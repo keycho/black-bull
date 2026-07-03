@@ -1,0 +1,21 @@
+{
+  "name": "black-bull",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "black bull - a massively multiplayer voxel stampede. ride. charge. reign.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}

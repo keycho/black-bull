@@ -1,0 +1,821 @@
+// black bull - boot + the frame loop + all the wiring. every system is built
+// here and connected through callbacks, so the dependency graph is explicit:
+//
+//   world (voxel continent) -> bull (local controller) -> impacts (this file)
+//   net (presence + broadcast) -> remotebulls / npcs / events (shared state)
+//   momentum + cosmetics (progression) -> hud / minimap / audio (presentation)
+//
+// impact resolution lives here: the local client detects its own rams (it is
+// authoritative for its own bull), tells the victim over the wire, and the
+// victim applies the shove to itself. npc rams are arbitrated by the host.
+
+import * as THREE from "three";
+import { audio } from "./audio";
+import { Bull } from "./bull";
+import { BullModel } from "./bullmodel";
+import { Chat } from "./chat";
+import { Cinematic } from "./cinematic";
+import {
+  ALPHA_MIN,
+  GALLOP,
+  GRID,
+  HIT_RADIUS,
+  KB_BASE,
+  KB_MAX,
+  KB_SCALE,
+  KB_UP,
+  KILL_CREDIT_S,
+  M_BEAR,
+  M_GOLDEN,
+  M_KING_BOUNTY,
+  M_RAM_MAX,
+  M_RAM_MIN,
+  M_WILD,
+  M_WIPEOUT,
+  RAM_SPEED_MIN,
+  SELF_SLOW,
+  STAMPEDE_MULT,
+  STAMPEDE_SPEED,
+  WORLD,
+} from "./config";
+import { CATALOG } from "./cosmetics";
+import { Events, EVENT_TITLES, type EventKind } from "./events";
+import { fx } from "./feedback";
+import { Flow, pickSpawn } from "./flow";
+import { Hud } from "./hud";
+import { Minimap } from "./minimap";
+import { Momentum, type Stats } from "./momentum";
+import { Net, ST } from "./net";
+import { NPC_BEAR, NPC_GOLDEN, NPC_WILD, NpcManager } from "./npc";
+import { Particles, Shake } from "./particles";
+import { RemoteBulls } from "./remotebulls";
+import { makeSkyTexture } from "./textures";
+import { BIOME_NAMES } from "./voxels";
+import { buildWorld, type World } from "./world";
+
+// ---------------------------------------------------------------------------
+// renderer
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById("scene") as HTMLCanvasElement;
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  powerPreference: "high-performance",
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.04;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+
+const BASE_FOV = 72;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 600);
+scene.add(camera);
+fx.attach(camera); // toasts + world-anchored floating text project through it
+
+// ---------------------------------------------------------------------------
+// sky + atmosphere: a warm high-plains dawn
+// ---------------------------------------------------------------------------
+const sunDir = new THREE.Vector3(0.5, 0.3, -0.62).normalize();
+const sunU = Math.atan2(sunDir.z, sunDir.x) / (Math.PI * 2) + 0.5;
+
+const skyTex = makeSkyTexture(sunU);
+scene.background = skyTex;
+scene.environment = skyTex;
+scene.environmentIntensity = 0.42;
+
+// warm dust haze for depth; far plane kept moderate so the huge battlefield
+// stays cheap - only chunks within this radius render, the rest fading out.
+const fog = new THREE.Fog(0x9a7350, 50, 330);
+scene.fog = fog;
+
+const sun = new THREE.DirectionalLight(0xffeed8, 2.1);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 300;
+const SH = 62; // local shadow frustum follows the player -> crisp shadows anywhere
+sun.shadow.camera.left = -SH;
+sun.shadow.camera.right = SH;
+sun.shadow.camera.top = SH;
+sun.shadow.camera.bottom = -SH;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 1.0;
+scene.add(sun);
+scene.add(sun.target);
+const SUN_DIST = 140;
+
+scene.add(new THREE.HemisphereLight(0xd8c8a8, 0x2a2018, 0.6));
+
+const rim = new THREE.DirectionalLight(0xd6742c, 0.3);
+rim.position.set(-WORLD * 0.4, WORLD * 0.3, WORLD * 0.4);
+scene.add(rim);
+
+// ---------------------------------------------------------------------------
+// world + core systems
+// ---------------------------------------------------------------------------
+const world: World = buildWorld();
+scene.add(world.group);
+
+const shake = new Shake();
+const particles = new Particles(scene);
+
+const spawn0 = pickSpawn(world);
+const bull = new Bull(world, camera, spawn0.x, spawn0.z, spawn0.yaw);
+const bullModel = new BullModel(scene, true);
+
+const momentum = new Momentum();
+const hud = new Hud();
+
+// networking (no-op without supabase env; solo = host-of-one)
+const net = new Net();
+net.onRemoteEdit = (x, y, z, type) => world.voxels.applyRemoteEdit(x, y, z, type);
+net.connect();
+const remoteBulls = new RemoteBulls(scene, net, particles);
+const npcs = new NpcManager(scene, world, net, particles);
+
+// ---------------------------------------------------------------------------
+// spatial audio helper: pan + gain for a world point, relative to the camera
+// ---------------------------------------------------------------------------
+function panGain(x: number, z: number, range = 130): { pan: number; gain: number } {
+  const dx = x - bull.pos.x;
+  const dz = z - bull.pos.z;
+  const dist = Math.hypot(dx, dz);
+  const ang = Math.atan2(dx, -dz) - bull.camYaw; // camera-relative bearing
+  return { pan: Math.max(-1, Math.min(1, Math.sin(ang))), gain: Math.max(0, 1 - dist / range) };
+}
+
+// ---------------------------------------------------------------------------
+// impact resolution
+// ---------------------------------------------------------------------------
+let lastHitBy = ""; // who last rammed us (wipeout credit)
+let lastHitAt = -1e9;
+const hitCooldown = new Map<string, number>(); // victim id -> earliest next hit (s)
+let clock = 0;
+
+// the local bull rammed someone / something: shared juice
+function ramJuice(px: number, py: number, pz: number, power: number) {
+  particles.impact(px, py, pz, power);
+  shake.add(0.25 + power * 0.45);
+  audio.impact(power);
+  hud.flash(0.12 + power * 0.25, "255,220,160");
+}
+
+function tryLocalRams() {
+  if (!bull.ramming) return;
+  const speed = bull.speed;
+  const power01 = Math.min(1, speed / STAMPEDE_SPEED);
+
+  // vs other riders
+  for (const [id, r] of net.remotes) {
+    if (!r.inWorld || r.st === ST.ko) continue;
+    const rp = remoteBulls.posOf(id);
+    const rx = rp ? rp.x : r.x;
+    const ry = rp ? rp.y : r.y;
+    const rz = rp ? rp.z : r.z;
+    const dx = rx - bull.pos.x;
+    const dy = ry - bull.pos.y;
+    const dz = rz - bull.pos.z;
+    if (Math.abs(dy) > 2.4) continue;
+    const dist = Math.hypot(dx, dz);
+    if (dist > HIT_RADIUS) continue;
+    if ((hitCooldown.get(id) ?? 0) > clock) continue;
+    // only a hit if we are actually moving INTO them
+    const nx = dx / (dist || 1);
+    const nz = dz / (dist || 1);
+    const closing = bull.vel.x * nx + bull.vel.z * nz;
+    if (closing < RAM_SPEED_MIN * 0.55) continue;
+    hitCooldown.set(id, clock + 0.8);
+    const kb = Math.min(KB_MAX, (KB_BASE + (closing - RAM_SPEED_MIN) * KB_SCALE) * momentum.powerMult);
+    const px = bull.pos.x + nx * 1.1;
+    const pz2 = bull.pos.z + nz * 1.1;
+    net.sendRam(id, nx, nz, kb, KB_UP, px, bull.pos.y + 0.8, pz2);
+    bull.confirmedHit(SELF_SLOW);
+    ramJuice(px, bull.pos.y + 0.8, pz2, power01);
+    momentum.award(M_RAM_MIN + (M_RAM_MAX - M_RAM_MIN) * power01);
+    momentum.noteRam();
+    fx.damage(rx, ry + 2.4, rz, Math.round(kb), kb > 30);
+  }
+
+  // vs npcs (host arbitrates the kill/claim)
+  for (const n of npcs.list()) {
+    const dx = n.pos.x - bull.pos.x;
+    const dz = n.pos.z - bull.pos.z;
+    if (Math.abs(n.pos.y - bull.pos.y) > 2.4) continue;
+    const dist = Math.hypot(dx, dz);
+    if (dist > HIT_RADIUS + 0.2) continue;
+    const key = "n" + n.id;
+    if ((hitCooldown.get(key) ?? 0) > clock) continue;
+    const nx = dx / (dist || 1);
+    const nz = dz / (dist || 1);
+    if (bull.vel.x * nx + bull.vel.z * nz < RAM_SPEED_MIN * 0.55) continue;
+    hitCooldown.set(key, clock + 0.8);
+    npcs.ramNpc(n.id, power01);
+    bull.confirmedHit(0.75); // npcs barely slow a stampede
+    ramJuice(n.pos.x, n.pos.y + 0.8, n.pos.z, power01 * 0.8);
+  }
+
+  // vs the wild herd of... nothing else. walls handle themselves.
+}
+
+// gentle push-apart so idle bulls never interpenetrate (no ram, just shoulder)
+function softSeparation(dt: number) {
+  if (!bull.isLive) return;
+  for (const [id, r] of net.remotes) {
+    if (!r.inWorld || r.st === ST.ko) continue;
+    const rp = remoteBulls.posOf(id);
+    const rx = rp ? rp.x : r.x;
+    const rz = rp ? rp.z : r.z;
+    const dx = bull.pos.x - rx;
+    const dz = bull.pos.z - rz;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.05 && d < 1.5 && Math.abs((rp ? rp.y : r.y) - bull.pos.y) < 2) {
+      bull.pos.x += (dx / d) * 2.4 * dt;
+      bull.pos.z += (dz / d) * 2.4 * dt;
+    }
+  }
+}
+
+// someone rammed US: apply the shove locally (we own our bull)
+net.onRam = (from, dx, dz, kb, up, px, py, pz, npc) => {
+  if (!bull.canBeHit || flow.stage !== "playing") return;
+  bull.applyKnockback(dx, dz, kb, up);
+  momentum.hitTaken();
+  if (!npc) {
+    lastHitBy = from;
+    lastHitAt = clock;
+  }
+  particles.impact(px, py, pz, Math.min(1, kb / KB_MAX));
+  shake.add(0.35 + (kb / KB_MAX) * 0.5);
+  audio.impact(Math.min(1, kb / KB_MAX));
+  hud.flash(0.3, "255,90,60");
+};
+// a ram we merely witness: play it where it happened
+net.onRemoteRamFx = (px, py, pz, kb) => {
+  particles.impact(px, py, pz, Math.min(1, kb / KB_MAX) * 0.8);
+  const { pan, gain } = panGain(px, pz);
+  if (gain > 0.02) audio.impact(Math.min(1, kb / KB_MAX), pan, gain);
+};
+
+// someone announced their wipeout: credit + feed + king bounty
+net.onKo = (id, by, x, y, z) => {
+  const name = net.remotes.get(id)?.name ?? "a rider";
+  particles.debris(x, y, z, 8, 0x8a7a5e);
+  if (by === net.id) {
+    momentum.award(M_WIPEOUT);
+    momentum.noteWipeoutCaused();
+    fx.toast(`you wiped out ${name}`, "kill");
+    fx.killPop(x, y + 2, z, M_WIPEOUT);
+    if (events.kingId && id === events.kingId) {
+      momentum.award(M_KING_BOUNTY);
+      momentum.noteEventWin();
+      fx.toast(`king down · +${M_KING_BOUNTY} momentum`, "wave");
+      audio.unlock();
+    }
+  } else if (id === events.kingId) {
+    fx.toast(`the king was brought down`, "wave");
+  }
+};
+net.onRoar = (id) => {
+  const r = net.remotes.get(id);
+  if (!r) return;
+  const { pan, gain } = panGain(r.x, r.z, 170);
+  audio.roar(pan, Math.max(0.15, gain), r.cos.crown === 1);
+};
+
+// ---------------------------------------------------------------------------
+// the local bull's physics callbacks
+// ---------------------------------------------------------------------------
+bull.onLaunch = (c) => {
+  audio.chargeOff();
+  audio.launch(c);
+  shake.add(0.12 + c * 0.2);
+  particles.impact(bull.pos.x, bull.pos.y, bull.pos.z, c * 0.4, 0x8a7a5e);
+};
+bull.onWhiff = () => {
+  audio.snort();
+  fx.toast("winded - you missed", "warn");
+};
+bull.onWallSlam = (speed) => {
+  const s01 = Math.min(1, speed / STAMPEDE_SPEED);
+  audio.wallThud(s01);
+  shake.add(0.2 + s01 * 0.3);
+  particles.impact(bull.pos.x, bull.pos.y + 0.5, bull.pos.z, s01 * 0.7, 0x8a8078);
+};
+bull.onLandHard = (impact) => {
+  shake.add(Math.min(0.4, impact * 0.012));
+  particles.hoofDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, impact, 1.6);
+};
+bull.onHazard = (kind) => wipeoutLocal(kind === "water" ? "you went into the water" : "you were cooked on the lava");
+
+function wipeoutLocal(reason: string) {
+  if (!bull.isLive) return;
+  audio.chargeOff();
+  bull.wipeout();
+  momentum.wipeout();
+  hud.showKo(reason);
+  audio.wipeout();
+  const by = clock - lastHitAt < KILL_CREDIT_S ? lastHitBy : "";
+  net.sendKo(by, bull.pos.x, bull.pos.y, bull.pos.z);
+  lastHitBy = "";
+  // if the king wipes out while we are the king, the crown bounty is lost
+}
+
+// npc kills/claims confirmed by the host: award whoever earned it
+npcs.onGone = (ty, by, x, y, z) => {
+  particles.impact(x, y, z, 0.6, ty === NPC_GOLDEN ? 0xd6a129 : 0x8a6a44);
+  if (ty === NPC_GOLDEN) particles.sparkle(x, y, z, 22);
+  if (by !== net.id) return;
+  if (ty === NPC_GOLDEN) {
+    momentum.award(M_GOLDEN);
+    momentum.noteGolden();
+    audio.golden();
+    fx.toast(`golden bull claimed · +${M_GOLDEN} momentum`, "good");
+    fx.killPop(x, y + 2, z, M_GOLDEN);
+  } else if (ty === NPC_BEAR) {
+    momentum.award(M_BEAR);
+    momentum.noteBear();
+    fx.toast(`bear launched · +${M_BEAR} momentum`, "kill");
+    fx.killPop(x, y + 2, z, M_BEAR);
+  } else if (ty === NPC_WILD) {
+    momentum.award(M_WILD);
+    fx.killPop(x, y + 2, z, M_WILD);
+  }
+};
+npcs.onLocalShove = (dx, dz, kb, up) => {
+  if (!bull.canBeHit || flow.stage !== "playing") return;
+  bull.applyKnockback(dx, dz, kb, up);
+  momentum.hitTaken();
+  shake.add(0.3);
+  audio.impact(0.4);
+  hud.flash(0.25, "255,90,60");
+};
+npcs.getPlayers = () => {
+  const list: { id: string; x: number; y: number; z: number; local: boolean }[] = [];
+  if (flow.stage === "playing" && bull.isLive) list.push({ id: net.id, x: bull.pos.x, y: bull.pos.y, z: bull.pos.z, local: true });
+  for (const [id, r] of net.remotes) if (r.inWorld && r.st !== ST.ko) list.push({ id, x: r.x, y: r.y, z: r.z, local: false });
+  return list;
+};
+
+// ---------------------------------------------------------------------------
+// world events
+// ---------------------------------------------------------------------------
+const events = new Events({
+  net,
+  world,
+  fx: particles,
+  shake,
+  scene,
+  npcs,
+  localPos: () => bull.pos,
+  inWorldIds: () => {
+    const ids: string[] = [];
+    if (flow.stage === "playing") ids.push(net.id);
+    for (const [id, r] of net.remotes) if (r.inWorld) ids.push(id);
+    return ids;
+  },
+  knockLocal: (dx, dz, kb, up) => {
+    if (!bull.canBeHit || flow.stage !== "playing") return;
+    bull.applyKnockback(dx, dz, kb, up);
+    hud.flash(0.3, "255,180,120");
+  },
+  toast: (t, k) => fx.toast(t, (k as never) ?? "info"),
+  onBanner: (title, sub) => {
+    hud.showBanner(title, sub);
+    audio.blip(true);
+  },
+  onEventStart: (k) => {
+    if (k === "king" && events.kingId === net.id) fx.toast("you are the king bull - survive", "wave");
+  },
+  onEventEnd: (k, data) => {
+    hud.clearBanner();
+    if (k === "king" && data && data === net.id && bull.isLive) {
+      momentum.award(M_KING_BOUNTY);
+      momentum.noteEventWin();
+      fx.toast(`you survived as king · +${M_KING_BOUNTY} momentum`, "wave");
+      audio.unlock();
+    } else {
+      fx.toast(`${EVENT_TITLES[k]} over`, "info");
+    }
+  },
+  onKing: (id) => {
+    if (id && id !== net.id) {
+      const name = net.remotes.get(id)?.name ?? "a rider";
+      fx.toast(`${name} is the king bull - hunt them`, "wave");
+    }
+  },
+  sfx: {
+    warn: () => audio.eventWarn(),
+    thunder: (d) => audio.thunder(d),
+    meteor: (d) => audio.meteorBoom(d),
+    rumble: (on) => audio.rumble(on),
+  },
+});
+
+// ---------------------------------------------------------------------------
+// front-door flow + presence
+// ---------------------------------------------------------------------------
+const loaderEl = document.getElementById("loader");
+const lockEl = document.getElementById("lock-prompt") as HTMLElement;
+const netEl = document.getElementById("net-status");
+const fpsEl = document.getElementById("fps-hud");
+const fpsNumEl = fpsEl?.querySelector(".fps-num") as HTMLElement | null;
+
+function syncLockUI(stage: string) {
+  const locked = !!document.pointerLockElement;
+  lockEl?.classList.toggle("hidden", locked || stage !== "playing");
+}
+function syncStageUI(stage: string) {
+  document.body.classList.toggle("playing", stage === "playing");
+  hud.setVisible(stage === "playing");
+  audio.setStage(stage);
+  syncLockUI(stage);
+}
+
+const flow = new Flow({
+  camera,
+  bull,
+  bullModel,
+  world,
+  fog,
+  stats: () => momentum.stats,
+  onStageChange: syncStageUI,
+  onJoin: (name, cos) => net.join(name, cos),
+  onLookChange: (name, cos) => net.updateLook(name, cos),
+});
+
+lockEl?.addEventListener("click", () => bull.requestLock());
+document.addEventListener("pointerlockchange", () => syncLockUI(flow.stage));
+
+// the controls panel inside the lock prompt swallows its own clicks
+const lockInnerEl = document.getElementById("lock-inner");
+const lockToggleEl = document.getElementById("lock-controls-toggle");
+const lockPanelEl = document.querySelector(".lock-ctrls-panel");
+lockToggleEl?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  lockInnerEl?.classList.toggle("controls-open");
+});
+lockPanelEl?.addEventListener("click", (e) => e.stopPropagation());
+
+// unlock celebration: when a stat change opens a new cosmetic, say so
+function countUnlocked(stats: Stats): number {
+  let n = 0;
+  for (const o of CATALOG) if (o.unlocked(stats)) n++;
+  return n;
+}
+let unlockedCount = -1;
+momentum.onUnlockCheck = () => {
+  const now = countUnlocked(momentum.stats);
+  if (unlockedCount >= 0 && now > unlockedCount) {
+    fx.toast("new cosmetic unlocked - check the stable", "good");
+    audio.unlock();
+    flow.rebuildSlots();
+  }
+  unlockedCount = now;
+};
+momentum.onUnlockCheck();
+
+// momentum tier celebrations
+let lastTier = 0;
+momentum.onChange = (_v, tier) => {
+  if (tier > lastTier) {
+    audio.tierUp();
+    fx.toast(`momentum tier up`, "good");
+  }
+  lastTier = tier;
+};
+
+// cinematic flythrough for clips: k toggles, escape cancels
+const cine = new Cinematic({
+  camera,
+  fog,
+  groundAt: (x, z) => world.voxels.surfaceBelow(x, z, 80),
+});
+window.addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  const a = document.activeElement;
+  if (a && /input|textarea|select/i.test(a.tagName)) return;
+  if (e.code === "KeyK") {
+    if (cine.active || flow.stage === "playing") cine.toggle();
+  } else if (e.code === "Escape" && cine.active) {
+    cine.stop();
+  } else if (e.code === "KeyR" && flow.stage === "playing" && bull.isLive) {
+    audio.roar(0, 1, flow.getLook().cos.crown === 1);
+    net.sendRoar();
+    shake.add(0.08);
+  }
+});
+const inCinematic = () => cine.active;
+bull.setInputGate(() => !cine.active);
+
+// chat: enter to type, rides the public broadcast plane
+const chat = new Chat({
+  canUse: () => flow.stage === "playing" || flow.stage === "stable",
+  inWorld: () => flow.stage === "playing",
+  self: () => ({ name: net.myName, color: net.myColor }),
+  send: (t) => net.sendChat(t),
+});
+net.onChat = (id, name, text) => {
+  const r = net.remotes.get(id);
+  chat.add(name, text, r ? [0xe23b3b, 0xf5c542, 0x3b82f6, 0x21c07a, 0x9b51e0, 0xf07b1b][r.cos.trim % 6] : 0xf0dcb4);
+};
+
+// minimap: riders, npcs, alpha, king, event zone over the biome backdrop
+let alphaId = "";
+const minimap = new Minimap({
+  self: () => ({ x: bull.pos.x, z: bull.pos.z, yaw: bull.camYaw }),
+  selfColor: () => net.myColor,
+  eachBull: (cb) => {
+    for (const [id, r] of net.remotes) {
+      if (!r.inWorld) continue;
+      const color = [0xe23b3b, 0xf5c542, 0x3b82f6, 0x21c07a, 0x9b51e0, 0xf07b1b][r.cos.trim % 6];
+      cb(r.x, r.z, color, r.name, id === alphaId, id === events.kingId);
+    }
+  },
+  eachNpc: (cb) => npcs.eachNpc(cb),
+  eventZone: () => events.zone,
+  canExpand: () => flow.stage === "playing" && !inCinematic(),
+  terrain: () => world.heights,
+  biomes: () => world.voxels.biome,
+});
+let mmAccum = 0;
+
+// ---------------------------------------------------------------------------
+// render loop
+// ---------------------------------------------------------------------------
+let last = performance.now();
+let landingFrames = 0;
+let fpsShown = true;
+let fpsAccum = 0;
+let fpsFrames = 0;
+let fpsAvg = 60;
+let lowPerfAudio = false;
+const CAM_FAR_MAX = camera.far;
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyP" && !e.repeat) {
+    fpsShown = !fpsShown;
+    fpsEl?.classList.toggle("show", fpsShown);
+  }
+});
+
+const shakeOff = new THREE.Vector3();
+let gallopDist = 0;
+let gallopHeavy = false;
+let dustT = 0;
+let wasCharging = false;
+
+function frame(now: number) {
+  const dt = (now - last) / 1000;
+  last = now;
+  clock += Math.min(dt, 0.1);
+
+  const stage = flow.stage;
+  const playing = stage === "playing";
+
+  // perks + event multipliers feed the controller each frame
+  bull.perkSpeed = momentum.speedMult;
+  bull.eventSpeed = events.stampedeOn ? STAMPEDE_MULT : 1;
+
+  if (playing && !inCinematic()) bull.update(dt);
+  flow.update(dt, now);
+  if (cine.active) cine.update(dt);
+
+  // sun shadow follows the player
+  sun.position.set(bull.pos.x + sunDir.x * SUN_DIST, sunDir.y * SUN_DIST, bull.pos.z + sunDir.z * SUN_DIST);
+  sun.target.position.set(bull.pos.x, 0, bull.pos.z);
+  sun.target.updateMatrixWorld();
+
+  if (playing) {
+    softSeparation(dt);
+    tryLocalRams();
+
+    // respawn after the ko screen
+    if (bull.state === "ko" && bull.koTimeLeft <= 0) {
+      const sp = pickSpawn(world);
+      bull.respawn(sp.x, sp.z, sp.yaw);
+      hud.hideKo();
+      fx.toast("back on your hooves", "info");
+    }
+
+    // survival trickle + alpha reign
+    momentum.tickSurvive(dt, bull.isLive);
+    momentum.tickAlpha(dt, alphaId === net.id);
+
+    // local juice: gallop steps, dust, trails, charge fx
+    const speed = bull.speed;
+    if (bull.grounded && speed > 3) {
+      gallopDist += speed * dt;
+      const stride = 2.4 + speed * 0.08;
+      if (gallopDist > stride) {
+        gallopDist = 0;
+        gallopHeavy = !gallopHeavy;
+        audio.gallopStep(Math.min(1, 0.35 + speed / 30 + momentum.frac * 0.2), gallopHeavy);
+      }
+    }
+    dustT -= dt;
+    if (speed > 7 && bull.grounded && dustT <= 0) {
+      dustT = 0.06;
+      particles.hoofDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, speed, 0.9 + momentum.frac * 1.3);
+      const trail = flow.getLook().cos.trail;
+      if (trail > 0 && speed > RAM_SPEED_MIN) particles.trail(bull.pos.x, bull.pos.y, bull.pos.z, trail);
+    }
+    const charging = bull.state === "charging";
+    if (charging) {
+      audio.chargeSet(bull.charge01);
+      particles.chargeDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.charge01);
+      if (bull.charge01 >= 1) shake.floor(0.08); // trembling at full power
+    } else if (wasCharging) {
+      audio.chargeOff();
+    }
+    wasCharging = charging;
+  }
+
+  // the local bull model mirrors the controller (always third person)
+  if (stage === "playing") {
+    bullModel.setVisible(true);
+    bullModel.update(dt, now, bull.pos, bull.yaw, bull.speed, bull.pose(), bull.charge01);
+  }
+  bullModel.setMomentumTier(momentum.tier);
+
+  // alpha election: highest momentum in the herd (min floor), crown for all
+  let bestM = momentum.value;
+  let bestId = flow.stage === "playing" ? net.id : "";
+  for (const [id, r] of net.remotes) {
+    if (r.inWorld && r.momentum > bestM) {
+      bestM = r.momentum;
+      bestId = id;
+    }
+  }
+  const newAlpha = bestM >= ALPHA_MIN ? bestId : "";
+  if (newAlpha !== alphaId) {
+    alphaId = newAlpha;
+    if (alphaId === net.id) fx.toast("you are the alpha bull - the herd can see you", "wave");
+    else if (alphaId) fx.toast(`${net.remotes.get(alphaId)?.name ?? "a rider"} is the alpha bull`, "info");
+  }
+  remoteBulls.alphaId = alphaId;
+  bullModel.setAlpha(playing && alphaId === net.id);
+
+  // shared systems tick every frame
+  npcs.update(dt, now);
+  events.update(dt, now);
+  particles.update(dt);
+  fx.update(dt);
+  hud.update(dt);
+
+  // hud readouts
+  if (playing) {
+    hud.setCharge(bull.charge01, bull.state === "charging", bull.state === "winded");
+    hud.setMomentum(momentum.value, momentum.tier, alphaId === net.id);
+    const gi = Math.floor(bull.pos.x + GRID / 2);
+    const gj = Math.floor(bull.pos.z + GRID / 2);
+    if (gi >= 0 && gi < GRID && gj >= 0 && gj < GRID) {
+      const b = world.voxels.biome[gi * GRID + gj];
+      hud.setBiome(b >= 0 ? BIOME_NAMES[b] : "open water");
+    }
+  }
+  if (events.current) hud.updateBanner(events.warnLeft, events.timeLeft, EVENT_TITLES[events.current as EventKind]);
+
+  // broadcast our bull (state code from the controller state)
+  const stCode =
+    bull.state === "charging" ? ST.charging
+    : bull.state === "launched" ? ST.launched
+    : bull.state === "stagger" ? ST.stagger
+    : bull.state === "tumble" ? ST.tumble
+    : bull.state === "winded" ? ST.winded
+    : bull.state === "ko" ? ST.ko
+    : ST.run;
+  net.setLocal(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, stCode, bull.charge01, momentum.value, playing, now);
+  net.tick(now);
+  remoteBulls.update(dt, now);
+
+  // minimap + chat + status
+  const mmShow = playing && !inCinematic();
+  minimap.setVisible(mmShow);
+  if (mmShow) {
+    if (minimap.isOpen()) minimap.draw();
+    else {
+      mmAccum += dt;
+      if (mmAccum >= 0.06) {
+        mmAccum = 0;
+        minimap.draw();
+      }
+    }
+  }
+  chat.setVisible((stage === "stable" || playing) && !inCinematic());
+  if (netEl) {
+    const showNet = net.enabled && (stage === "stable" || playing);
+    netEl.classList.toggle("show", showNet);
+    if (showNet) netEl.textContent = `herd · ${net.onlineCount} online${net.isHost ? " · host" : ""}`;
+  }
+
+  // adaptive music: events raise the floor; nearby bulls read as a brewing fight
+  audio.setEventMood(events.active);
+  let near = 0;
+  for (const r of net.remotes.values()) {
+    if (!r.inWorld) continue;
+    const d = Math.hypot(r.x - bull.pos.x, r.z - bull.pos.z);
+    if (d < 40) near += 1 - d / 40;
+  }
+  audio.setThreat(Math.min(1, near * 0.4 + (bull.state === "launched" ? 0.3 : 0)));
+
+  // camera: fov kick with speed + shake offset
+  const wantFov = BASE_FOV + (playing ? Math.min(14, Math.max(0, bull.speed - GALLOP) * 0.55) : 0);
+  if (Math.abs(camera.fov - wantFov) > 0.1) {
+    camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 8);
+    camera.updateProjectionMatrix();
+  }
+  camera.position.add(shake.offset(dt, shakeOff));
+
+  // water shimmer
+  world.waterBump.offset.x += dt * 0.03;
+  world.waterBump.offset.y += dt * 0.018;
+
+  // clamp the camera far plane to just past the fog wall
+  const wantFar = Math.min(CAM_FAR_MAX, fog.far + 36);
+  if (Math.abs(camera.far - wantFar) > 0.5) {
+    camera.far = wantFar;
+    camera.updateProjectionMatrix();
+  }
+
+  // fps meter + adaptive audio perf
+  fpsAccum += dt;
+  fpsFrames++;
+  if (fpsAccum >= 0.5) {
+    const fps = fpsFrames / fpsAccum;
+    fpsAvg = fpsAvg * 0.5 + fps * 0.5;
+    if (fpsShown && fpsNumEl) {
+      fpsNumEl.textContent = String(Math.round(fps));
+      if (fpsEl) fpsEl.dataset.lvl = fps >= 55 ? "good" : fps >= 38 ? "ok" : "bad";
+    }
+    if (!lowPerfAudio && fpsAvg < 45) {
+      lowPerfAudio = true;
+      audio.setPerfMode(true);
+    } else if (lowPerfAudio && fpsAvg > 56) {
+      lowPerfAudio = false;
+      audio.setPerfMode(false);
+    }
+    fpsAccum = 0;
+    fpsFrames = 0;
+  }
+
+  // the landing backdrop freezes after a few settled frames (gpu relief)
+  if (stage === "landing") landingFrames++;
+  else landingFrames = 0;
+  if (stage !== "landing" || landingFrames <= 8) renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  landingFrames = 0;
+});
+
+// boot log: the world is already generated by the time this runs
+const bootLog = document.getElementById("boot-log");
+const bootBar = document.getElementById("boot-bar-fill");
+const bootPct = document.getElementById("boot-pct");
+const BOOT_LINES = [
+  "black bull // waking the herd",
+  "raising the battlefield",
+  "carving rivers and canyons",
+  "building the colosseum",
+  "releasing the wild herd",
+  "opening the gates",
+];
+(function runBoot() {
+  let i = 0;
+  const total = BOOT_LINES.length + 1;
+  const progress = (n: number) => {
+    const pct = Math.round((n / total) * 100);
+    if (bootBar) bootBar.style.width = pct + "%";
+    if (bootPct) bootPct.textContent = pct + "%";
+  };
+  const step = () => {
+    if (i < BOOT_LINES.length) {
+      const el = document.createElement("div");
+      el.className = "boot-line";
+      el.innerHTML = `<span><span class="b-arrow">›</span> ${BOOT_LINES[i]}</span><span class="b-ok">ok</span>`;
+      bootLog?.appendChild(el);
+      progress(++i);
+      window.setTimeout(step, 110 + Math.random() * 90);
+    } else {
+      const el = document.createElement("div");
+      el.className = "boot-line boot-done";
+      el.innerHTML = `<span><span class="b-ok2">[ok]</span> the herd is ready</span><span class="b-cursor"></span>`;
+      bootLog?.appendChild(el);
+      progress(total);
+      window.setTimeout(() => {
+        loaderEl?.classList.add("hidden");
+        window.setTimeout(() => loaderEl?.remove(), 700);
+      }, 360);
+    }
+  };
+  step();
+})();
