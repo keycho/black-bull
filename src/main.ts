@@ -53,6 +53,8 @@ import { Net, ST } from "./net";
 import { NPC_BEAR, NPC_GOLDEN, NPC_WHITE, NPC_WILD, NpcManager } from "./npc";
 import { Particles, Shake } from "./particles";
 import { RemoteBulls } from "./remotebulls";
+import { Rider } from "./rider";
+import { RiderModel } from "./ridermodel";
 import { makeSkyTexture } from "./textures";
 import { BIOME_NAMES } from "./voxels";
 import { buildWorld, type World } from "./world";
@@ -132,6 +134,15 @@ const spawn0 = pickSpawn(world);
 const bull = new Bull(world, camera, spawn0.x, spawn0.z, spawn0.yaw);
 const bullModel = new BullModel(scene, true);
 
+// on-foot mode: hop off your bull (c) and run around, bouncing off any bull's
+// back for big air. the rider owns its own controller + model + chase camera;
+// while on foot the bull is PARKED (riderless, idling) at `parked` and the
+// local player IS the rider. `mode` is the master switch main branches on.
+const rider = new Rider(world, camera);
+const riderModel = new RiderModel(scene);
+let mode: "ride" | "foot" = "ride";
+const parked = new THREE.Vector3(); // where the bull waits while you are on foot
+
 const momentum = new Momentum();
 const hud = new Hud();
 // herd points: the $ansem earn ledger (economic only, never gameplay).
@@ -145,15 +156,52 @@ net.onRemoteEdit = (x, y, z, type) => world.voxels.applyRemoteEdit(x, y, z, type
 net.connect();
 const remoteBulls = new RemoteBulls(scene, net, particles);
 const npcs = new NpcManager(scene, world, net, particles);
+// parked remote bulls sit on the terrain, so remote rendering needs ground height
+remoteBulls.groundY = (x, z) => world.voxels.surfaceBelow(x, z, 80);
+
+// bounce: on foot, descending onto ANY bull's back launches you skyward. the
+// candidates are your own parked bull, every remote rider's bull (mounted or
+// parked), and every npc in the herd - so you can chain hops across a stampede.
+const BOUNCE_R = 1.7; // horizontal reach onto a back
+const BULL_BACK = 1.6; // a bull's back sits ~this far above its base
+rider.bounceUnder = (x, z, feetY) => {
+  const onBack = (bx: number, by: number, bz: number) =>
+    Math.hypot(x - bx, z - bz) <= BOUNCE_R && feetY >= by + 0.5 && feetY <= by + BULL_BACK + 0.9;
+  if (onBack(parked.x, parked.y, parked.z)) return { vy: rider.bounceUp() };
+  for (const [id, r] of net.remotes) {
+    if (!r.inWorld) continue;
+    const p = remoteBulls.posOf(id); // interpolated bull pos (parked pos when they are on foot)
+    const bx = p ? p.x : r.foot ? r.bx : r.x;
+    const by = p ? p.y : r.y;
+    const bz = p ? p.z : r.foot ? r.bz : r.z;
+    if (onBack(bx, by, bz)) return { vy: rider.bounceUp() };
+  }
+  for (const n of npcs.list()) if (onBack(n.pos.x, n.pos.y, n.pos.z)) return { vy: rider.bounceUp() };
+  return null;
+};
+rider.onBounce = (x, y, z, power) => {
+  particles.impact(x, y, z, 0.35 + power * 0.4, 0x21c07a);
+  shake.add(0.1 + power * 0.18);
+  audio.launch(0.35 + power * 0.4);
+  riderModel.landPulse();
+};
+rider.onLand = (impact) => {
+  particles.hoofDust(rider.pos.x, rider.pos.y, rider.pos.z, rider.yaw, impact, 1.0);
+  shake.add(Math.min(0.22, impact * 0.018));
+  riderModel.landPulse();
+};
 
 // ---------------------------------------------------------------------------
 // spatial audio helper: pan + gain for a world point, relative to the camera
 // ---------------------------------------------------------------------------
 function panGain(x: number, z: number, range = 130): { pan: number; gain: number } {
-  const dx = x - bull.pos.x;
-  const dz = z - bull.pos.z;
+  const lx = mode === "foot" ? rider.pos.x : bull.pos.x;
+  const lz = mode === "foot" ? rider.pos.z : bull.pos.z;
+  const cy = mode === "foot" ? rider.camYaw : bull.camYaw;
+  const dx = x - lx;
+  const dz = z - lz;
   const dist = Math.hypot(dx, dz);
-  const ang = Math.atan2(dx, -dz) - bull.camYaw; // camera-relative bearing
+  const ang = Math.atan2(dx, -dz) - cy; // camera-relative bearing
   return { pan: Math.max(-1, Math.min(1, Math.sin(ang))), gain: Math.max(0, 1 - dist / range) };
 }
 
@@ -261,9 +309,15 @@ function softSeparation(dt: number) {
 
 // someone rammed US: apply the shove locally (we own our bull)
 net.onRam = (from, dx, dz, kb, up, px, py, pz, npc) => {
-  if (!bull.canBeHit || flow.stage !== "playing") return;
-  bull.applyKnockback(dx, dz, kb, up);
-  momentum.hitTaken();
+  if (flow.stage !== "playing") return;
+  if (mode === "foot") {
+    // on foot you get bowled over instead of shoved on your bull
+    rider.knock(dx, dz, Math.min(kb, KB_MAX) * 0.5, up * 0.55);
+  } else {
+    if (!bull.canBeHit) return;
+    bull.applyKnockback(dx, dz, kb, up);
+    momentum.hitTaken();
+  }
   if (!npc) {
     lastHitBy = from;
     lastHitAt = clock;
@@ -377,16 +431,25 @@ npcs.onGone = (ty, by, x, y, z) => {
   }
 };
 npcs.onLocalShove = (dx, dz, kb, up) => {
-  if (!bull.canBeHit || flow.stage !== "playing") return;
-  bull.applyKnockback(dx, dz, kb, up);
-  momentum.hitTaken();
+  if (flow.stage !== "playing") return;
+  if (mode === "foot") {
+    rider.knock(dx, dz, kb * 0.5, up * 0.55);
+  } else {
+    if (!bull.canBeHit) return;
+    bull.applyKnockback(dx, dz, kb, up);
+    momentum.hitTaken();
+  }
   shake.add(0.3);
   audio.impact(0.4);
   hud.flash(0.25, "255,90,60");
 };
 npcs.getPlayers = () => {
   const list: { id: string; x: number; y: number; z: number; local: boolean }[] = [];
-  if (flow.stage === "playing" && bull.isLive) list.push({ id: net.id, x: bull.pos.x, y: bull.pos.y, z: bull.pos.z, local: true });
+  // on foot the rider IS the local target; the parked bull is not
+  if (flow.stage === "playing") {
+    if (mode === "foot") list.push({ id: net.id, x: rider.pos.x, y: rider.pos.y, z: rider.pos.z, local: true });
+    else if (bull.isLive) list.push({ id: net.id, x: bull.pos.x, y: bull.pos.y, z: bull.pos.z, local: true });
+  }
   for (const [id, r] of net.remotes) if (r.inWorld && r.st !== ST.ko) list.push({ id, x: r.x, y: r.y, z: r.z, local: false });
   return list;
 };
@@ -401,7 +464,7 @@ const events = new Events({
   shake,
   scene,
   npcs,
-  localPos: () => bull.pos,
+  localPos: () => (mode === "foot" ? rider.pos : bull.pos),
   inWorldIds: () => {
     const ids: string[] = [];
     if (flow.stage === "playing") ids.push(net.id);
@@ -409,8 +472,13 @@ const events = new Events({
     return ids;
   },
   knockLocal: (dx, dz, kb, up) => {
-    if (!bull.canBeHit || flow.stage !== "playing") return;
-    bull.applyKnockback(dx, dz, kb, up);
+    if (flow.stage !== "playing") return;
+    if (mode === "foot") {
+      rider.knock(dx, dz, kb * 0.5, up * 0.55);
+    } else {
+      if (!bull.canBeHit) return;
+      bull.applyKnockback(dx, dz, kb, up);
+    }
     hud.flash(0.3, "255,180,120");
   },
   toast: (t, k) => fx.toast(t, (k as never) ?? "info"),
@@ -547,14 +615,38 @@ window.addEventListener("keydown", (e) => {
     if (cine.active || flow.stage === "playing") cine.toggle();
   } else if (e.code === "Escape" && cine.active) {
     cine.stop();
-  } else if (e.code === "KeyR" && flow.stage === "playing" && bull.isLive) {
+  } else if (e.code === "KeyC" && flow.stage === "playing" && !cine.active && !earn.isOpen) {
+    toggleFoot();
+  } else if (e.code === "KeyR" && flow.stage === "playing" && mode === "ride" && bull.isLive) {
     audio.roar(0, 1, flow.getLook().cos.crown === 1);
     net.sendRoar();
     shake.add(0.08);
   }
 });
 const inCinematic = () => cine.active;
-bull.setInputGate(() => !cine.active && !earn.isOpen);
+bull.setInputGate(() => !cine.active && !earn.isOpen && mode === "ride");
+rider.setInputGate(() => !cine.active && !earn.isOpen && mode === "foot");
+
+// hop off / climb back on. dismount parks the bull where it stands and drops
+// you on foot; remount whistles it back to your feet. blocked while ko'd.
+function toggleFoot() {
+  if (mode === "ride") {
+    if (!bull.isLive) return;
+    parked.set(bull.pos.x, world.voxels.surfaceBelow(bull.pos.x, bull.pos.z, 60), bull.pos.z);
+    riderModel.setCosmetics(flow.getLook().cos);
+    riderModel.setName(net.myName);
+    rider.activate(bull.pos.x, bull.pos.z, bull.yaw, bull.camYaw);
+    mode = "foot";
+    audio.snort();
+    fx.toast("on foot - wasd to run, space to jump, land on a bull to bounce, c to remount", "info");
+  } else {
+    rider.deactivate();
+    bull.respawn(rider.pos.x, rider.pos.z, rider.yaw);
+    mode = "ride";
+    audio.blip(false);
+    fx.toast("back in the saddle", "info");
+  }
+}
 
 // pvp duels: challenge a nearby rider (u), fight with rams, climb the ladder (l).
 // friendly only - no money, no wager. you keep riding your bull during the duel,
@@ -587,6 +679,7 @@ if (location.search.includes("bbdebug")) {
   (window as unknown as Record<string, unknown>).__bb = {
     state: () => ({
       id: net.id,
+      stage: flow.stage,
       st: bull.state,
       locked: bull.locked,
       broken: bull.lockBroken,
@@ -594,6 +687,15 @@ if (location.search.includes("bbdebug")) {
       speed: Math.round(bull.speed * 10) / 10,
       charge: bull.charge01,
       m: momentum.value,
+      mode,
+      foot: [
+        Math.round(rider.pos.x * 10) / 10,
+        Math.round(rider.pos.y * 10) / 10,
+        Math.round(rider.pos.z * 10) / 10,
+        Math.round(rider.speed * 10) / 10,
+      ],
+      grounded: rider.grounded,
+      bounced: rider.bouncedThisFrame,
       bearsNear: npcs.list().filter((n) => n.ty === NPC_BEAR && Math.hypot(n.pos.x - bull.pos.x, n.pos.z - bull.pos.z) < 60).length,
       bears: npcs
         .list()
@@ -608,17 +710,19 @@ if (location.search.includes("bbdebug")) {
       net.remotes.set(id, {
         id, x, y: bull.pos.y, z, yaw: 0, st: 0, charge: 0, momentum: 0,
         name, cos: { coat: 0, trim: 0, horns: 0, eyes: 0, trail: 0, hooves: 0, armor: 0, crown: 0, rider: 0 },
-        inWorld: true, t: performance.now(),
+        inWorld: true, foot: false, bx: x, bz: z, t: performance.now(),
       });
     },
     injectDuel: (m: Record<string, unknown>) => net.onDuel?.(m as never),
+    // toggle on-foot mode (same as pressing c) - drives the headless foot proof
+    dismount: () => toggleFoot(),
   };
 }
 
 // minimap: riders, npcs, alpha, king, event zone over the biome backdrop
 let alphaId = "";
 const minimap = new Minimap({
-  self: () => ({ x: bull.pos.x, z: bull.pos.z, yaw: bull.camYaw }),
+  self: () => (mode === "foot" ? { x: rider.pos.x, z: rider.pos.z, yaw: rider.camYaw } : { x: bull.pos.x, z: bull.pos.z, yaw: bull.camYaw }),
   selfColor: () => net.myColor,
   eachBull: (cb) => {
     for (const [id, r] of net.remotes) {
@@ -674,23 +778,32 @@ function frame(now: number) {
   bull.perkSpeed = momentum.speedMult;
   bull.eventSpeed = events.stampedeOn ? STAMPEDE_MULT : 1;
 
-  if (playing && !inCinematic()) bull.update(dt);
+  if (playing && !inCinematic()) {
+    if (mode === "foot") rider.update(dt);
+    else bull.update(dt);
+  }
   flow.update(dt, now);
   if (cine.active) cine.update(dt);
 
+  // the "player" the world revolves around: your bull, or you on foot
+  const focus = mode === "foot" ? rider.pos : bull.pos;
+  const curSpeed = mode === "foot" ? rider.speed : bull.speed;
+
   // sun shadow follows the player
-  sun.position.set(bull.pos.x + sunDir.x * SUN_DIST, sunDir.y * SUN_DIST, bull.pos.z + sunDir.z * SUN_DIST);
-  sun.target.position.set(bull.pos.x, 0, bull.pos.z);
+  sun.position.set(focus.x + sunDir.x * SUN_DIST, sunDir.y * SUN_DIST, focus.z + sunDir.z * SUN_DIST);
+  sun.target.position.set(focus.x, 0, focus.z);
   sun.target.updateMatrixWorld();
 
   if (playing) {
-    softSeparation(dt);
-    tryLocalRams();
+    if (mode === "ride") {
+      softSeparation(dt);
+      tryLocalRams();
+    }
 
     // the entry ambush announces itself the first time bears close in
     if (!bearAmbushToast) {
       for (const n of npcs.list()) {
-        if (n.ty === NPC_BEAR && Math.hypot(n.pos.x - bull.pos.x, n.pos.z - bull.pos.z) < 45) {
+        if (n.ty === NPC_BEAR && Math.hypot(n.pos.x - focus.x, n.pos.z - focus.z) < 45) {
           bearAmbushToast = true;
           fx.toast("bear ambush - ram them off", "warn");
           audio.eventWarn();
@@ -720,39 +833,61 @@ function frame(now: number) {
       alphaEarnT = 0;
     }
 
-    // local juice: gallop steps, dust, trails, charge fx
-    const speed = bull.speed;
-    if (bull.grounded && speed > 3) {
-      gallopDist += speed * dt;
-      const stride = 2.4 + speed * 0.08;
-      if (gallopDist > stride) {
-        gallopDist = 0;
-        gallopHeavy = !gallopHeavy;
-        audio.gallopStep(Math.min(1, 0.35 + speed / 30 + momentum.frac * 0.2), gallopHeavy);
+    if (mode === "ride") {
+      // local juice: gallop steps, dust, trails, charge fx
+      const speed = bull.speed;
+      if (bull.grounded && speed > 3) {
+        gallopDist += speed * dt;
+        const stride = 2.4 + speed * 0.08;
+        if (gallopDist > stride) {
+          gallopDist = 0;
+          gallopHeavy = !gallopHeavy;
+          audio.gallopStep(Math.min(1, 0.35 + speed / 30 + momentum.frac * 0.2), gallopHeavy);
+        }
+      }
+      dustT -= dt;
+      if (speed > 7 && bull.grounded && dustT <= 0) {
+        dustT = 0.06;
+        particles.hoofDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, speed, 0.9 + momentum.frac * 1.3);
+        const trail = flow.getLook().cos.trail;
+        if (trail > 0 && speed > RAM_SPEED_MIN) particles.trail(bull.pos.x, bull.pos.y, bull.pos.z, trail);
+      }
+      const charging = bull.state === "charging";
+      if (charging) {
+        audio.chargeSet(bull.charge01);
+        particles.chargeDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.charge01);
+        if (bull.charge01 >= 1) shake.floor(0.08); // trembling at full power
+      } else if (wasCharging) {
+        audio.chargeOff();
+      }
+      wasCharging = charging;
+    } else {
+      // on foot: light kicked-up dust while sprinting on the ground
+      dustT -= dt;
+      if (rider.grounded && rider.speed > 5 && dustT <= 0) {
+        dustT = 0.09;
+        particles.hoofDust(rider.pos.x, rider.pos.y, rider.pos.z, rider.yaw, rider.speed, 0.5);
       }
     }
-    dustT -= dt;
-    if (speed > 7 && bull.grounded && dustT <= 0) {
-      dustT = 0.06;
-      particles.hoofDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, speed, 0.9 + momentum.frac * 1.3);
-      const trail = flow.getLook().cos.trail;
-      if (trail > 0 && speed > RAM_SPEED_MIN) particles.trail(bull.pos.x, bull.pos.y, bull.pos.z, trail);
-    }
-    const charging = bull.state === "charging";
-    if (charging) {
-      audio.chargeSet(bull.charge01);
-      particles.chargeDust(bull.pos.x, bull.pos.y, bull.pos.z, bull.charge01);
-      if (bull.charge01 >= 1) shake.floor(0.08); // trembling at full power
-    } else if (wasCharging) {
-      audio.chargeOff();
-    }
-    wasCharging = charging;
   }
 
-  // the local bull model mirrors the controller (always third person)
+  // the local bull model mirrors the controller (always third person). on foot
+  // it shows the bull PARKED + riderless where you left it, and the rider model
+  // runs at your feet instead.
   if (stage === "playing") {
     bullModel.setVisible(true);
-    bullModel.update(dt, now, bull.pos, bull.yaw, bull.speed, bull.pose(), bull.charge01);
+    if (mode === "foot") {
+      bullModel.setRiderVisible(false);
+      bullModel.update(dt, now, parked, bull.yaw, 0, "idle", 0);
+      riderModel.setVisible(true);
+      riderModel.update(dt, now, rider.pos, rider.yaw, rider.speed, rider.pose());
+    } else {
+      bullModel.setRiderVisible(true);
+      riderModel.setVisible(false);
+      bullModel.update(dt, now, bull.pos, bull.yaw, bull.speed, bull.pose(), bull.charge01);
+    }
+  } else {
+    riderModel.setVisible(false);
   }
   bullModel.setMomentumTier(momentum.tier);
 
@@ -772,7 +907,7 @@ function frame(now: number) {
     else if (alphaId) fx.toast(`${net.remotes.get(alphaId)?.name ?? "a rider"} is the alpha bull`, "info");
   }
   remoteBulls.alphaId = alphaId;
-  bullModel.setAlpha(playing && alphaId === net.id);
+  bullModel.setAlpha(playing && mode === "ride" && alphaId === net.id);
 
   // shared systems tick every frame
   npcs.update(dt, now);
@@ -805,7 +940,12 @@ function frame(now: number) {
     : bull.state === "winded" ? ST.winded
     : bull.state === "ko" ? ST.ko
     : ST.run;
-  net.setLocal(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, stCode, bull.charge01, momentum.value, playing, now);
+  if (mode === "foot") {
+    // on the wire: (x,y,z) is the rider, (bx,bz) is the parked bull
+    net.setLocal(rider.pos.x, rider.pos.y, rider.pos.z, rider.yaw, ST.run, 0, momentum.value, playing, now, true, parked.x, parked.z);
+  } else {
+    net.setLocal(bull.pos.x, bull.pos.y, bull.pos.z, bull.yaw, stCode, bull.charge01, momentum.value, playing, now);
+  }
   net.tick(now);
   remoteBulls.update(dt, now);
 
@@ -855,7 +995,7 @@ function frame(now: number) {
   audio.setThreat(Math.min(1, near * 0.4 + (bull.state === "launched" ? 0.3 : 0)));
 
   // camera: fov kick with speed + shake offset
-  const wantFov = BASE_FOV + (playing ? Math.min(14, Math.max(0, bull.speed - GALLOP) * 0.55) : 0);
+  const wantFov = BASE_FOV + (playing ? Math.min(14, Math.max(0, curSpeed - GALLOP) * 0.55) : 0);
   if (Math.abs(camera.fov - wantFov) > 0.1) {
     camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 8);
     camera.updateProjectionMatrix();

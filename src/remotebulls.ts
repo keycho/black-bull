@@ -10,6 +10,7 @@ import { BullModel, type BullPose } from "./bullmodel";
 import { MOMENTUM_CAP, RAM_SPEED_MIN, TIERS } from "./config";
 import type { Net, RemoteState } from "./net";
 import type { Particles } from "./particles";
+import { RiderModel } from "./ridermodel";
 
 function lerpAngle(a: number, b: number, t: number): number {
   const d = ((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
@@ -20,10 +21,14 @@ const POSE_OF: BullPose[] = ["run", "charge", "launch", "stagger", "tumble", "wi
 
 interface RB {
   model: BullModel;
-  pos: THREE.Vector3;
+  rider: RiderModel | null; // built lazily the first time this player goes on foot
+  pos: THREE.Vector3; // the bull's world pos (parked pos when on foot)
   target: THREE.Vector3;
+  footPos: THREE.Vector3; // the rider-on-foot world pos
+  footTarget: THREE.Vector3;
   yaw: number;
   targetYaw: number;
+  onFoot: boolean;
   name: string;
   cosKey: string;
   dustT: number;
@@ -53,51 +58,86 @@ export class RemoteBulls {
         model.setVisible(r.inWorld);
         b = {
           model,
-          pos: new THREE.Vector3(r.x, r.y, r.z),
-          target: new THREE.Vector3(r.x, r.y, r.z),
+          rider: null,
+          pos: new THREE.Vector3(r.foot ? r.bx : r.x, r.y, r.foot ? r.bz : r.z),
+          target: new THREE.Vector3(r.foot ? r.bx : r.x, r.y, r.foot ? r.bz : r.z),
+          footPos: new THREE.Vector3(r.x, r.y, r.z),
+          footTarget: new THREE.Vector3(r.x, r.y, r.z),
           yaw: r.yaw,
           targetYaw: r.yaw,
+          onFoot: r.foot,
           name: r.name,
           cosKey: cosKey(r),
           dustT: 0,
         };
         this.bulls.set(id, b);
       }
-      b.target.set(r.x, r.y, r.z);
+      // when on foot, the bull is parked at (bx,bz) and the rider is at (x,y,z)
+      b.onFoot = r.foot;
+      if (r.foot) {
+        b.target.set(r.bx, this.groundY(r.bx, r.bz), r.bz);
+        b.footTarget.set(r.x, r.y, r.z);
+      } else {
+        b.target.set(r.x, r.y, r.z);
+      }
       b.targetYaw = r.yaw;
-      b.model.setVisible(r.inWorld);
       const ck = cosKey(r);
       if (ck !== b.cosKey) {
         b.model.setCosmetics(r.cos);
+        b.rider?.setCosmetics(r.cos);
         b.cosKey = ck;
       }
       if (r.name !== b.name) {
         b.model.setName(r.name);
+        b.rider?.setName(r.name);
         b.name = r.name;
       }
-      // momentum tier -> horn glow; the alpha wears the floating crown
       b.model.setMomentumTier(tierOf(r.momentum));
-      b.model.setAlpha(id === this.alphaId && r.inWorld);
+      // a parked bull shows no rider + no crown; a mounted bull shows both
+      b.model.setVisible(r.inWorld);
+      b.model.setRiderVisible(!r.foot);
+      b.model.setAlpha(!r.foot && id === this.alphaId && r.inWorld);
+      // build the on-foot model lazily the first time this player dismounts
+      if (r.foot && r.inWorld && !b.rider) {
+        b.rider = new RiderModel(this.scene);
+        b.rider.setCosmetics(r.cos);
+        b.rider.setName(r.name);
+      }
+      b.rider?.setVisible(r.foot && r.inWorld);
     }
 
     // remove models for riders who left
     for (const [id, b] of this.bulls) {
       if (!remotes.has(id)) {
         this.scene.remove(b.model.group);
+        if (b.rider) this.scene.remove(b.rider.group);
         this.bulls.delete(id);
       }
     }
 
-    // interpolate position/yaw, derive speed, drive the animation + local fx
+    // interpolate + drive the animation + local fx
     const a = 1 - Math.exp(-dt / 0.08);
     for (const [id, b] of this.bulls) {
       const r = remotes.get(id);
       if (!r || !r.inWorld) continue;
       const px = b.pos.x;
       const pz = b.pos.z;
-      if (b.pos.distanceToSquared(b.target) > 100) b.pos.copy(b.target); // snap teleports (respawns)
+      if (b.pos.distanceToSquared(b.target) > 100) b.pos.copy(b.target); // snap teleports
       else b.pos.lerp(b.target, a);
       b.yaw = lerpAngle(b.yaw, b.targetYaw, a);
+
+      if (r.foot) {
+        // parked bull: idle at (bx,bz); the rider runs at (x,y,z)
+        b.model.update(dt, now, b.pos, b.yaw, 0, "idle", 0);
+        const last = this.lastFoot.get(id) ?? { x: b.footPos.x, z: b.footPos.z };
+        if (b.footPos.distanceToSquared(b.footTarget) > 100) b.footPos.copy(b.footTarget);
+        else b.footPos.lerp(b.footTarget, a);
+        const speedF = Math.hypot(b.footPos.x - last.x, b.footPos.z - last.z) / Math.max(dt, 1e-4);
+        this.lastFoot.set(id, { x: b.footPos.x, z: b.footPos.z });
+        b.rider?.update(dt, now, b.footPos, b.yaw, speedF, speedF > 0.6 ? "run" : "idle");
+        continue;
+      }
+
       const speed = Math.hypot(b.pos.x - px, b.pos.z - pz) / Math.max(dt, 1e-4);
       const pose = POSE_OF[r.st] ?? "run";
       b.model.update(dt, now, b.pos, b.yaw, speed, pose === "run" && speed < 0.7 ? "idle" : pose, r.charge);
@@ -113,6 +153,10 @@ export class RemoteBulls {
       if (r.st === 1) this.fx.chargeDust(b.pos.x, b.pos.y, b.pos.z, r.charge);
     }
   }
+
+  // ground height provider (set by main so parked bulls sit on the terrain)
+  groundY: (x: number, z: number) => number = () => 0;
+  private lastFoot = new Map<string, { x: number; z: number }>();
 }
 
 function tierOf(m: number): number {

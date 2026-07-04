@@ -523,6 +523,11 @@ export class BullModel {
     if (!v) this.alphaCrown.visible = false;
   }
 
+  // hide just the rider (for a parked, dismounted bull)
+  setRiderVisible(v: boolean) {
+    this.rider.visible = v;
+  }
+
   // drive the whole model for one frame. speed in units/s; pose from the
   // controller (or derived from the network state for remote bulls).
   update(dt: number, now: number, pos: THREE.Vector3, yaw: number, speed: number, pose: BullPose, charge01 = 0) {

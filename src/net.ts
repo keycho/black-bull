@@ -58,6 +58,11 @@ export interface RemoteState {
   name: string;
   cos: Cosmetics;
   inWorld: boolean;
+  // on-foot mode: when foot is true, (x,y,z) is the RIDER on foot and (bx,bz)
+  // is their parked, riderless bull; when false, (x,y,z) is the bull as usual.
+  foot: boolean;
+  bx: number;
+  bz: number;
   t: number; // last update (performance.now ms)
 }
 
@@ -256,8 +261,12 @@ export class Net {
   // the last state we broadcast (for receive-side range checks)
   private selfPos: { x: number; z: number } | null = null;
 
-  // call every frame with the local bull state; self-throttled to POS_HZ.
-  setLocal(x: number, y: number, z: number, yaw: number, st: number, charge: number, momentum: number, inWorld: boolean, now: number) {
+  // call every frame with the local state; self-throttled to POS_HZ. when the
+  // rider is on foot, (x,y,z) is the rider and (bx,bz) is the parked bull.
+  setLocal(
+    x: number, y: number, z: number, yaw: number, st: number, charge: number, momentum: number, inWorld: boolean, now: number,
+    foot = false, bx = x, bz = z
+  ) {
     this.selfPos = { x, z };
     if (!this.joined || !this.channel) return;
     if (now - this.lastSend < SEND_INTERVAL) return;
@@ -275,6 +284,9 @@ export class Net {
         c: Math.round(charge * 100) / 100,
         m: Math.round(momentum),
         w: inWorld ? 1 : 0,
+        f: foot ? 1 : 0,
+        bx: Math.round(bx * 100) / 100,
+        bz: Math.round(bz * 100) / 100,
       },
     });
   }
@@ -393,6 +405,9 @@ export class Net {
       r.charge = p.c ?? 0;
       r.momentum = p.m ?? 0;
       r.inWorld = p.w === 1;
+      r.foot = p.f === 1;
+      r.bx = p.bx ?? p.x;
+      r.bz = p.bz ?? p.z;
       r.t = performance.now();
     } else {
       const look = this.looks.get(p.id);
@@ -408,6 +423,9 @@ export class Net {
         name: look?.name ?? "rider",
         cos: look?.cos ?? { ...DEFAULT_COSMETICS },
         inWorld: p.w === 1,
+        foot: p.f === 1,
+        bx: p.bx ?? p.x,
+        bz: p.bz ?? p.z,
         t: performance.now(),
       });
     }
@@ -475,6 +493,9 @@ interface PosMsg {
   c?: number; // charge 0..1
   m?: number; // momentum
   w?: number; // 1 = in world
+  f?: number; // 1 = on foot (x,y,z is the rider; bx,bz is the parked bull)
+  bx?: number;
+  bz?: number;
 }
 interface RamMsg {
   id: string; // hitter
