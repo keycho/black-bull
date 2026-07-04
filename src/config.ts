@@ -103,6 +103,12 @@ export const NPC_SYNC_HZ = 8; // host -> everyone npc snapshot rate
 export const BEAR_SWIPE_KB = 15;
 export const BEAR_SWIPE_R = 2.6;
 
+// the welcome ambush: every rider who enters the world gets jumped by a bear
+// pack right away - the first fight finds YOU.
+export const GREET_BEARS = 3; // bears in the entry ambush
+export const GREET_R = 20; // ring distance they spawn at
+export const GREET_BEAR_LIFE = 150; // s before ignored ambush bears wander off
+
 // white bulls: the hostile herd - they hunt riders in packs, telegraph a
 // wind-up, then charge. dodge the line, counter-ram them while they recover.
 export const WHITE_COUNT = 12; // roaming white bulls (packs of ~3)

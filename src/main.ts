@@ -560,6 +560,11 @@ if (location.search.includes("bbdebug")) {
       speed: Math.round(bull.speed * 10) / 10,
       charge: bull.charge01,
       m: momentum.value,
+      bearsNear: npcs.list().filter((n) => n.ty === NPC_BEAR && Math.hypot(n.pos.x - bull.pos.x, n.pos.z - bull.pos.z) < 60).length,
+      bears: npcs
+        .list()
+        .filter((n) => n.ty === NPC_BEAR)
+        .map((n) => [Math.round(n.pos.x), Math.round(n.pos.y), Math.round(n.pos.z)]),
     }),
   };
 }
@@ -590,6 +595,7 @@ let mmAccum = 0;
 let last = performance.now();
 let landingFrames = 0;
 let lockNoticeShown = false;
+let bearAmbushToast = false;
 let fpsShown = true;
 let fpsAccum = 0;
 let fpsFrames = 0;
@@ -633,6 +639,18 @@ function frame(now: number) {
   if (playing) {
     softSeparation(dt);
     tryLocalRams();
+
+    // the entry ambush announces itself the first time bears close in
+    if (!bearAmbushToast) {
+      for (const n of npcs.list()) {
+        if (n.ty === NPC_BEAR && Math.hypot(n.pos.x - bull.pos.x, n.pos.z - bull.pos.z) < 45) {
+          bearAmbushToast = true;
+          fx.toast("bear ambush - ram them off", "warn");
+          audio.eventWarn();
+          break;
+        }
+      }
+    }
 
     // respawn after the ko screen
     if (bull.state === "ko" && bull.koTimeLeft <= 0) {

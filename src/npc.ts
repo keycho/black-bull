@@ -15,6 +15,9 @@ import { BullModel, type BullPose } from "./bullmodel";
 import {
   BEAR_SWIPE_KB,
   BEAR_SWIPE_R,
+  GREET_BEAR_LIFE,
+  GREET_BEARS,
+  GREET_R,
   GRID,
   KB_UP,
   NPC_SYNC_HZ,
@@ -62,6 +65,7 @@ interface Npc {
   swipeT: number;
   stateT: number; // windup / charge / stun timer
   cdT: number; // charge cooldown (the counter window)
+  life: number; // seconds before despawn (0 = forever); ambush bears expire
   hp: number;
   cdx: number; // committed charge direction
   cdz: number;
@@ -208,6 +212,7 @@ export class NpcManager {
       swipeT: 0,
       stateT: 0,
       cdT: 1 + Math.random() * 2,
+      life: 0,
       hp: ty === NPC_WHITE ? WHITE_HP : 1,
       cdx: 0,
       cdz: 0,
@@ -248,6 +253,24 @@ export class NpcManager {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       this.spawnAt(NPC_BEAR, cx + Math.cos(a) * r, cz + Math.sin(a) * r);
+    }
+  }
+  // the entry ambush: a tight ring of bears on a freshly-arrived rider. they
+  // aggro immediately (chase range is well past the ring) and wander off if
+  // ignored long enough.
+  private spawnGreetingBears(x: number, z: number) {
+    let placed = 0;
+    for (let i = 0; i < GREET_BEARS * 6 && placed < GREET_BEARS; i++) {
+      const a = i * 2.39996 + 0.6; // golden-angle scatter: every retry is a new spot
+      const r = GREET_R + (i % 3) * 4;
+      const bx = x + Math.cos(a) * r;
+      const bz = z + Math.sin(a) * r;
+      const gi = Math.floor(bx + GRID / 2);
+      const gj = Math.floor(bz + GRID / 2);
+      if (this.world.voxels.topAt(gi, gj) <= SEA) continue; // never in the water
+      const bear = this.spawnAt(NPC_BEAR, bx, bz);
+      bear.life = GREET_BEAR_LIFE;
+      placed++;
     }
   }
   // golden herd: rare fast bulls scattered mid-ring (host only)
@@ -332,6 +355,9 @@ export class NpcManager {
   }
 
   update(dt: number, now: number) {
+    // clamp the sim step so a hitching frame never teleports npcs (a bear
+    // taking one 3-second step scatters instead of chasing)
+    dt = Math.min(dt, 0.08);
     if (this.net.isHost) this.hostSim(dt, now);
 
     // render every npc (host renders its sim, others interpolate rows)
@@ -379,8 +405,24 @@ export class NpcManager {
     }
   }
 
+  private greeted = new Set<string>();
+  private wasHost = false;
+
   private hostSim(dt: number, now: number) {
     const players = this.getPlayers?.() ?? [];
+
+    // on taking the host seat mid-session, adopt everyone already in the
+    // world as greeted so a host handoff never re-ambushes the whole room
+    if (!this.wasHost) {
+      this.wasHost = true;
+      for (const pl of players) this.greeted.add(pl.id);
+    }
+    // every NEW arrival gets the welcome party - bears, immediately
+    for (const pl of players) {
+      if (this.greeted.has(pl.id)) continue;
+      this.greeted.add(pl.id);
+      this.spawnGreetingBears(pl.x, pl.z);
+    }
 
     // top up the ambient herds every so often
     this.respawnT -= dt;
@@ -391,6 +433,15 @@ export class NpcManager {
     }
 
     for (const p of this.npcs.values()) {
+      // ignored ambush bears eventually wander off
+      if (p.life > 0) {
+        p.life -= dt;
+        if (p.life <= 0) {
+          this.removeModel(p);
+          this.npcs.delete(p.id);
+          continue;
+        }
+      }
       // nearest player
       let best: { id: string; x: number; y: number; z: number; local: boolean } | null = null;
       let bestD = Infinity;
