@@ -34,6 +34,13 @@ built with three.js + typescript + vite, multiplayer over supabase realtime.
 - **world events** every few minutes: stampede, meteor shower (permanently
   reshapes the terrain), bear invasion, king bull, lightning storm, golden
   herd, earthquake (opens fissures + collapses bridges).
+- **earn to play.** riding earns HERD POINTS (wipeouts, white bulls, bears,
+  golden bulls, event wins, alpha reign - press g in-world for the ledger),
+  bounded by hourly/daily caps. points are economic only and never change
+  gameplay. the $ansem claim rail ships DORMANT: with no `VITE_EARN_CLAIM_URL`
+  set, nothing moves and the button says claims open soon. arming it requires
+  a payout service that re-validates server-side (the client ledger is not a
+  security boundary) - and that service, not this repo, holds any keys.
 - **cosmetics only.** horns, eyes, trails, hooves, armor, crown and roars
   unlock by playing. nothing bought or unlocked changes gameplay odds.
 - **the signature rider.** every bull is ridden by the community's signature

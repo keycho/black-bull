@@ -84,7 +84,7 @@ class Feedback {
     }
     if (now > this.xpUntil) this.xpTotal = 0; // a fresh burst
     this.xpTotal += amount;
-    this.xpEl.textContent = `+${this.xpTotal} xp`;
+    this.xpEl.textContent = `+${this.xpTotal} pts`;
     this.xpEl.classList.remove("show");
     void this.xpEl.offsetWidth; // restart the rise/fade animation on each tick
     this.xpEl.classList.add("show");

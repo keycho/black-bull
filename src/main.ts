@@ -41,6 +41,7 @@ import {
   WORLD,
 } from "./config";
 import { CATALOG } from "./cosmetics";
+import { Earn, EARN } from "./earn";
 import { Events, EVENT_TITLES, type EventKind } from "./events";
 import { fx } from "./feedback";
 import { Flow, pickSpawn } from "./flow";
@@ -132,6 +133,10 @@ const bullModel = new BullModel(scene, true);
 
 const momentum = new Momentum();
 const hud = new Hud();
+// herd points: the $ansem earn ledger (economic only, never gameplay).
+// declared before flow exists, so the gate reads through a late binding.
+let earnCanUse: () => boolean = () => false;
+const earn = new Earn({ canUse: () => earnCanUse() });
 
 // networking (no-op without supabase env; solo = host-of-one)
 const net = new Net();
@@ -200,6 +205,7 @@ function tryLocalRams() {
     ramJuice(px, bull.pos.y + 0.8, pz2, power01);
     momentum.award(M_RAM_MIN + (M_RAM_MAX - M_RAM_MIN) * power01);
     momentum.noteRam();
+    earn.award(EARN.ram);
     fx.damage(rx, ry + 2.4, rz, Math.round(kb), kb > 30);
   }
 
@@ -223,6 +229,7 @@ function tryLocalRams() {
       // landing a charge on the hostile herd pays per hit; the break pays more
       momentum.award(M_WHITE_HIT);
       momentum.noteRam();
+      earn.award(EARN.whiteHit);
       fx.damage(n.pos.x, n.pos.y + 2.4, n.pos.z, M_WHITE_HIT, false);
     }
   }
@@ -276,11 +283,13 @@ net.onKo = (id, by, x, y, z) => {
   if (by === net.id) {
     momentum.award(M_WIPEOUT);
     momentum.noteWipeoutCaused();
+    earn.award(EARN.wipeout);
     fx.toast(`you wiped out ${name}`, "kill");
     fx.killPop(x, y + 2, z, M_WIPEOUT);
     if (events.kingId && id === events.kingId) {
       momentum.award(M_KING_BOUNTY);
       momentum.noteEventWin();
+      earn.award(EARN.eventWin);
       fx.toast(`king down · +${M_KING_BOUNTY} momentum`, "wave");
       audio.unlock();
     }
@@ -341,17 +350,20 @@ npcs.onGone = (ty, by, x, y, z) => {
   if (ty === NPC_GOLDEN) {
     momentum.award(M_GOLDEN);
     momentum.noteGolden();
+    earn.award(EARN.golden);
     audio.golden();
     fx.toast(`golden bull claimed · +${M_GOLDEN} momentum`, "good");
     fx.killPop(x, y + 2, z, M_GOLDEN);
   } else if (ty === NPC_BEAR) {
     momentum.award(M_BEAR);
     momentum.noteBear();
+    earn.award(EARN.bear);
     fx.toast(`bear launched · +${M_BEAR} momentum`, "kill");
     fx.killPop(x, y + 2, z, M_BEAR);
   } else if (ty === NPC_WHITE) {
     momentum.award(M_WHITE);
     momentum.noteWhite();
+    earn.award(EARN.whiteBreak);
     audio.impact(1);
     fx.toast(`white bull broken · +${M_WHITE} momentum`, "kill");
     fx.killPop(x, y + 2, z, M_WHITE);
@@ -410,6 +422,7 @@ const events = new Events({
     if (k === "king" && data && data === net.id && bull.isLive) {
       momentum.award(M_KING_BOUNTY);
       momentum.noteEventWin();
+      earn.award(EARN.eventWin);
       fx.toast(`you survived as king · +${M_KING_BOUNTY} momentum`, "wave");
       audio.unlock();
     } else {
@@ -507,10 +520,14 @@ let lastTier = 0;
 momentum.onChange = (_v, tier) => {
   if (tier > lastTier) {
     audio.tierUp();
+    earn.award(EARN.tierUp);
     fx.toast(`momentum tier up`, "good");
   }
   lastTier = tier;
 };
+
+// the earn panel opens in-world (g or the chip); bull input pauses while open
+earnCanUse = () => flow.stage === "playing" && !inCinematic();
 
 // cinematic flythrough for clips: k toggles, escape cancels
 const cine = new Cinematic({
@@ -533,7 +550,7 @@ window.addEventListener("keydown", (e) => {
   }
 });
 const inCinematic = () => cine.active;
-bull.setInputGate(() => !cine.active);
+bull.setInputGate(() => !cine.active && !earn.isOpen);
 
 // chat: enter to type, rides the public broadcast plane. in-world only, so
 // enter in the stable deploys instead of fighting the chat for the key.
@@ -596,6 +613,7 @@ let last = performance.now();
 let landingFrames = 0;
 let lockNoticeShown = false;
 let bearAmbushToast = false;
+let alphaEarnT = 0;
 let fpsShown = true;
 let fpsAccum = 0;
 let fpsFrames = 0;
@@ -660,9 +678,18 @@ function frame(now: number) {
       fx.toast("back on your hooves", "info");
     }
 
-    // survival trickle + alpha reign
+    // survival trickle + alpha reign (the crown also pays herd points)
     momentum.tickSurvive(dt, bull.isLive);
     momentum.tickAlpha(dt, alphaId === net.id);
+    if (alphaId === net.id) {
+      alphaEarnT += dt;
+      if (alphaEarnT >= 10) {
+        alphaEarnT -= 10;
+        earn.award(EARN.alphaTick);
+      }
+    } else {
+      alphaEarnT = 0;
+    }
 
     // local juice: gallop steps, dust, trails, charge fx
     const speed = bull.speed;
@@ -754,6 +781,7 @@ function frame(now: number) {
   // minimap + chat + status
   const mmShow = playing && !inCinematic();
   minimap.setVisible(mmShow);
+  earn.setVisible(mmShow);
   if (mmShow) {
     if (minimap.isOpen()) minimap.draw();
     else {

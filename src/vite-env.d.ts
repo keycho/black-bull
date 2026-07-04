@@ -2,8 +2,7 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
-  readonly VITE_MINT_SERVICE_URL?: string; // railway minting service (onchain land)
-  readonly VITE_LAND_COLLECTION_URL?: string; // magic eden / tensor collection link
+  readonly VITE_EARN_CLAIM_URL?: string; // $ansem claim payout service (dormant when unset)
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv;
