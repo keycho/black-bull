@@ -796,7 +796,7 @@ const bootLog = document.getElementById("boot-log");
 const bootBar = document.getElementById("boot-bar-fill");
 const bootPct = document.getElementById("boot-pct");
 const BOOT_LINES = [
-  "black bull // waking the herd",
+  "Ansem: BullCraft // waking the herd",
   "raising the battlefield",
   "carving rivers and canyons",
   "building the colosseum",

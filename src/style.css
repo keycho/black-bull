@@ -55,7 +55,6 @@ body.playing {
   left: 16px;
   z-index: 30;
   pointer-events: none;
-  text-transform: lowercase;
 }
 #wordmark .mark {
   font: 800 17px/1 var(--sans);
@@ -674,9 +673,9 @@ body.in-world #momentum-hud {
   margin-bottom: 18px;
 }
 .brand-mark {
-  font: 900 clamp(56px, 11vw, 108px) / 0.95 var(--sans);
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
+  font: 900 clamp(38px, 7.6vw, 80px) / 1 var(--sans);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   color: var(--neon);
   text-shadow: 0 0 46px rgba(57, 255, 100, 0.5), 0 4px 26px rgba(43, 214, 74, 0.35), 0 2px 6px rgba(0, 0, 0, 0.85);
 }
@@ -890,9 +889,8 @@ body.in-world #momentum-hud {
   margin-bottom: 16px;
 }
 .boot-mark {
-  font: 900 26px/1 var(--sans);
-  letter-spacing: 0.1em;
-  text-transform: lowercase;
+  font: 900 24px/1 var(--sans);
+  letter-spacing: 0.06em;
   color: var(--ink);
 }
 .boot-tag {

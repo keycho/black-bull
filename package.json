@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "black bull - a massively multiplayer voxel stampede. ride. charge. reign.",
+  "description": "Ansem: BullCraft - the herd's massively multiplayer voxel stampede. charges forward. no matter what.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
