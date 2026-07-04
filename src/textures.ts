@@ -168,6 +168,14 @@ export function makeSkyTexture(sunU: number): THREE.CanvasTexture {
   ctx.fillStyle = band;
   ctx.fillRect(0, 0, W, H);
 
+  // a faint neon-green aurora above the horizon - the herd's colour in the sky
+  const aur = ctx.createLinearGradient(0, H * 0.28, 0, H * 0.46);
+  aur.addColorStop(0, "rgba(57,255,100,0)");
+  aur.addColorStop(0.6, "rgba(57,255,100,0.09)");
+  aur.addColorStop(1, "rgba(57,255,100,0)");
+  ctx.fillStyle = aur;
+  ctx.fillRect(0, 0, W, H);
+
   // localised hot sun bloom
   const sx = sunU * W;
   const sy = H * 0.485;

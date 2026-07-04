@@ -24,18 +24,19 @@ export const CATALOG: Option[] = [
   { cat: "rider", idx: 1, name: "sunshine tee", req: "", unlocked: () => true },
   { cat: "rider", idx: 2, name: "studio grey", req: "", unlocked: () => true },
   { cat: "rider", idx: 3, name: "visor classic", req: "", unlocked: () => true },
-  // horns
-  { cat: "horns", idx: 0, name: "bone horns", req: "", unlocked: () => true },
+  // horns - the neon green-gold glow is the signature look, free for the herd
+  { cat: "horns", idx: 0, name: "neon horns", req: "", unlocked: () => true },
   { cat: "horns", idx: 1, name: "obsidian horns", req: "land 25 charges", unlocked: (s) => s.rams >= 25 },
   { cat: "horns", idx: 2, name: "crystal horns", req: "reach 600 momentum", unlocked: (s) => s.best >= 600 },
   { cat: "horns", idx: 3, name: "inferno horns", req: "cause 10 wipeouts", unlocked: (s) => s.wipeouts >= 10 },
   // eyes
-  { cat: "eyes", idx: 0, name: "ember eyes", req: "", unlocked: () => true },
+  { cat: "eyes", idx: 0, name: "crimson eyes", req: "", unlocked: () => true },
   { cat: "eyes", idx: 1, name: "void eyes", req: "hold alpha for 120s total", unlocked: (s) => s.alphaS >= 120 },
   // trails
   { cat: "trail", idx: 0, name: "dust trail", req: "", unlocked: () => true },
   { cat: "trail", idx: 1, name: "lightning trail", req: "win 3 events", unlocked: (s) => s.events >= 3 },
   { cat: "trail", idx: 2, name: "fire trail", req: "land 50 charges", unlocked: (s) => s.rams >= 50 },
+  { cat: "trail", idx: 3, name: "toxic trail", req: "break 25 white bulls", unlocked: (s) => s.whites >= 25 },
   // hooves
   { cat: "hooves", idx: 0, name: "iron hooves", req: "", unlocked: () => true },
   { cat: "hooves", idx: 1, name: "fire hooves", req: "claim 5 golden bulls", unlocked: (s) => s.golden >= 5 },

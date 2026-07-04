@@ -30,9 +30,9 @@ export const TRIMS: { key: string; name: string; color: number }[] = [
 ];
 
 // cosmetic option ids (indices into these lists travel over the wire)
-export const HORN_SETS = ["bone", "obsidian", "crystal", "inferno"] as const;
-export const EYE_SETS = ["calm", "void"] as const;
-export const TRAIL_SETS = ["dust", "lightning", "fire"] as const;
+export const HORN_SETS = ["neon", "obsidian", "crystal", "inferno"] as const;
+export const EYE_SETS = ["crimson", "void"] as const;
+export const TRAIL_SETS = ["dust", "lightning", "fire", "toxic"] as const;
 export const HOOF_SETS = ["hoof", "fire"] as const;
 export const ARMOR_SETS = ["none", "ancient"] as const;
 export const CROWN_SETS = ["none", "golden"] as const;
@@ -394,7 +394,7 @@ export class BullModel {
     this.coatMat.color.setHex(coat);
     this.coatDark.color.setHex(coat).multiplyScalar(0.7);
     this.trimMat.color.setHex(trim);
-    // horn sets: bone / obsidian / crystal / inferno
+    // horn sets: neon (the signature green-gold glow) / obsidian / crystal / inferno
     switch (c.horns % HORN_SETS.length) {
       case 1:
         this.hornMat.color.setHex(0x241f2e);
@@ -412,19 +412,20 @@ export class BullModel {
         this.hornMat.metalness = 0.1;
         break;
       default:
-        this.hornMat.color.setHex(0xe8e0cc);
-        this.hornMat.emissive.setHex(0x000000);
-        this.hornMat.metalness = 0.1;
+        // the brand look: green glass horns running hot to gold at the tips
+        this.hornMat.color.setHex(0xd6ff6a);
+        this.hornMat.emissive.setHex(0x2fd64a);
+        this.hornMat.metalness = 0.15;
     }
-    // eye sets: calm ember / void
+    // eye sets: crimson (the brand's burning red) / void
     if (c.eyes % EYE_SETS.length === 1) {
       this.eyeMat.color.setHex(0xb44dff);
       this.eyeMat.emissive.setHex(0x7a1fd6);
       this.eyeMat.emissiveIntensity = 1.5;
     } else {
-      this.eyeMat.color.setHex(0xff5a3c);
-      this.eyeMat.emissive.setHex(0xc03418);
-      this.eyeMat.emissiveIntensity = 0.9;
+      this.eyeMat.color.setHex(0xff3a28);
+      this.eyeMat.emissive.setHex(0xd61e10);
+      this.eyeMat.emissiveIntensity = 1.25;
     }
     // hooves: plain / fire
     if (c.hooves % HOOF_SETS.length === 1) {

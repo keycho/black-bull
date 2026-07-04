@@ -1,10 +1,12 @@
 # black bull
 
-a massively multiplayer browser game where every player permanently rides a
-powerful black bull. no guns. no swords. only bulls. built on the proven voxel
-engine from this repo's previous games - the chunked instanced terrain,
-realtime networking, interpolation, procedural audio, minimap, chat and
-cinematic camera are all reused; only the gameplay is new.
+charges forward. no matter what.
+
+the herd's massively multiplayer browser game: every player permanently rides
+a powerful black bull. no guns. no swords. only bulls. black + neon green +
+amber, glowing horns, crimson eyes - built for the $ansem community. built on
+a proven voxel engine (chunked instanced terrain, realtime networking,
+interpolation, procedural audio, minimap, chat, cinematic camera).
 
 built with three.js + typescript + vite, multiplayer over supabase realtime.
 
@@ -25,6 +27,10 @@ built with three.js + typescript + vite, multiplayer over supabase realtime.
 - **the alpha bull.** whoever holds the most momentum wears a floating golden
   crown with a light beam, visible across the map. surviving as alpha builds
   score. the whole server naturally hunts them.
+- **white bulls.** the hostile herd: they roam in packs, hunt riders,
+  telegraph a wind-up and commit to a straight charge - sidestep the line and
+  counter-ram them in the recovery window. three hits breaks one; every hit
+  pays momentum, the break pays more, and 25 breaks unlock the toxic trail.
 - **world events** every few minutes: stampede, meteor shower (permanently
   reshapes the terrain), bear invasion, king bull, lightning storm, golden
   herd, earthquake (opens fissures + collapses bridges).

@@ -30,6 +30,8 @@ import {
   M_KING_BOUNTY,
   M_RAM_MAX,
   M_RAM_MIN,
+  M_WHITE,
+  M_WHITE_HIT,
   M_WILD,
   M_WIPEOUT,
   RAM_SPEED_MIN,
@@ -46,7 +48,7 @@ import { Hud } from "./hud";
 import { Minimap } from "./minimap";
 import { Momentum, type Stats } from "./momentum";
 import { Net, ST } from "./net";
-import { NPC_BEAR, NPC_GOLDEN, NPC_WILD, NpcManager } from "./npc";
+import { NPC_BEAR, NPC_GOLDEN, NPC_WHITE, NPC_WILD, NpcManager } from "./npc";
 import { Particles, Shake } from "./particles";
 import { RemoteBulls } from "./remotebulls";
 import { makeSkyTexture } from "./textures";
@@ -201,7 +203,7 @@ function tryLocalRams() {
     fx.damage(rx, ry + 2.4, rz, Math.round(kb), kb > 30);
   }
 
-  // vs npcs (host arbitrates the kill/claim)
+  // vs npcs (host arbitrates the kill/claim; whites take several hits)
   for (const n of npcs.list()) {
     const dx = n.pos.x - bull.pos.x;
     const dz = n.pos.z - bull.pos.z;
@@ -214,9 +216,15 @@ function tryLocalRams() {
     const nz = dz / (dist || 1);
     if (bull.vel.x * nx + bull.vel.z * nz < RAM_SPEED_MIN * 0.55) continue;
     hitCooldown.set(key, clock + 0.8);
-    npcs.ramNpc(n.id, power01);
+    npcs.ramNpc(n.id, power01, nx, nz);
     bull.confirmedHit(0.75); // npcs barely slow a stampede
     ramJuice(n.pos.x, n.pos.y + 0.8, n.pos.z, power01 * 0.8);
+    if (n.ty === NPC_WHITE) {
+      // landing a charge on the hostile herd pays per hit; the break pays more
+      momentum.award(M_WHITE_HIT);
+      momentum.noteRam();
+      fx.damage(n.pos.x, n.pos.y + 2.4, n.pos.z, M_WHITE_HIT, false);
+    }
   }
 
   // vs the wild herd of... nothing else. walls handle themselves.
@@ -341,6 +349,12 @@ npcs.onGone = (ty, by, x, y, z) => {
     momentum.noteBear();
     fx.toast(`bear launched · +${M_BEAR} momentum`, "kill");
     fx.killPop(x, y + 2, z, M_BEAR);
+  } else if (ty === NPC_WHITE) {
+    momentum.award(M_WHITE);
+    momentum.noteWhite();
+    audio.impact(1);
+    fx.toast(`white bull broken · +${M_WHITE} momentum`, "kill");
+    fx.killPop(x, y + 2, z, M_WHITE);
   } else if (ty === NPC_WILD) {
     momentum.award(M_WILD);
     fx.killPop(x, y + 2, z, M_WILD);
@@ -787,6 +801,7 @@ const BOOT_LINES = [
   "carving rivers and canyons",
   "building the colosseum",
   "releasing the wild herd",
+  "loosing the white bulls",
   "opening the gates",
 ];
 (function runBoot() {

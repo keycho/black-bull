@@ -1,16 +1,18 @@
 :root {
-  --ink: #f2ede4;
-  --muted: #ab9a80;
-  --dim: #8a7a5e;
-  --bg: #14100a;
-  --bg-2: #1c160e;
-  --line: #3a2e1e;
-  --gold: #e2b13b;
+  --ink: #f2f5ee;
+  --muted: #9aab92;
+  --dim: #6e8266;
+  --bg: #070a07;
+  --bg-2: #0d120c;
+  --line: #1e3020;
+  --gold: #f5a623;
   --gold-2: #ffd24a;
+  --neon: #39ff64;
+  --neon-2: #7dff5a;
   --ember: #f07b1b;
-  --danger: #e23b3b;
-  --good: #21c07a;
-  --hud-bg: rgba(20, 14, 8, 0.74);
+  --danger: #ff3b2e;
+  --good: #2bd64a;
+  --hud-bg: rgba(6, 12, 7, 0.78);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -77,7 +79,7 @@ body.playing {
   display: none;
   font: 600 11px/1 var(--mono);
   letter-spacing: 0.08em;
-  color: var(--gold);
+  color: var(--neon);
   background: var(--hud-bg);
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -163,15 +165,15 @@ body.in-world #charge-hud {
   height: 100%;
   width: 0%;
   border-radius: 5px;
-  background: linear-gradient(90deg, #8a5a20, var(--gold), var(--gold-2));
+  background: linear-gradient(90deg, #1a7a34, var(--neon), var(--gold-2));
   transition: width 0.04s linear;
 }
 #charge-hud.full #charge-fill {
-  background: linear-gradient(90deg, var(--ember), var(--gold-2), #fff2c0);
-  box-shadow: 0 0 14px rgba(255, 210, 74, 0.7);
+  background: linear-gradient(90deg, var(--neon), var(--gold-2), #fff2c0);
+  box-shadow: 0 0 16px rgba(87, 255, 120, 0.75);
 }
 #charge-hud.winded #charge-fill {
-  background: #6a5240;
+  background: #4a5a44;
 }
 #charge-label {
   font: 600 10px/1 var(--mono);
@@ -180,11 +182,11 @@ body.in-world #charge-hud {
   color: var(--dim);
 }
 #charge-hud.charging #charge-label {
-  color: var(--gold);
+  color: var(--neon);
 }
 #charge-hud.full #charge-label {
-  color: var(--gold-2);
-  text-shadow: 0 0 10px rgba(255, 210, 74, 0.7);
+  color: var(--neon-2);
+  text-shadow: 0 0 10px rgba(87, 255, 120, 0.8);
 }
 #charge-hud.winded #charge-label {
   color: var(--danger);
@@ -249,16 +251,16 @@ body.in-world #momentum-hud {
 #mom-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #8a5a20, var(--gold));
+  background: linear-gradient(90deg, #1a7a34, var(--neon));
   transition: width 0.2s ease-out;
 }
 #momentum-hud[data-tier="2"] #mom-fill {
-  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  background: linear-gradient(90deg, var(--neon), var(--gold-2));
 }
 #momentum-hud[data-tier="3"] #mom-fill,
 #momentum-hud[data-tier="4"] #mom-fill {
-  background: linear-gradient(90deg, var(--ember), var(--gold-2));
-  box-shadow: 0 0 8px rgba(255, 210, 74, 0.5);
+  background: linear-gradient(90deg, var(--neon-2), var(--gold-2));
+  box-shadow: 0 0 10px rgba(87, 255, 120, 0.55);
 }
 #momentum-hud .mh-foot {
   justify-content: space-between;
@@ -632,21 +634,42 @@ body.in-world #momentum-hud {
   justify-content: center;
 }
 
-/* landing */
+/* landing - the black bull look: black, neon green, amber, light streaks */
 #landing {
   flex-direction: column;
+  overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 72%, rgba(240, 123, 27, 0.16), transparent 55%),
-    linear-gradient(180deg, rgba(14, 9, 5, 0.62), rgba(14, 9, 5, 0.4) 45%, rgba(14, 9, 5, 0.78));
+    radial-gradient(ellipse at 50% 72%, rgba(43, 214, 74, 0.1), transparent 55%),
+    linear-gradient(180deg, rgba(4, 7, 4, 0.78), rgba(4, 7, 4, 0.55) 45%, rgba(4, 7, 4, 0.88));
+}
+/* neon arc streaks sweeping in from the right, like the poster */
+#landing::after {
+  content: "";
+  position: absolute;
+  right: -12%;
+  top: -25%;
+  width: 70%;
+  height: 150%;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, transparent 41.4%, rgba(57, 255, 100, 0.35) 42%, transparent 42.7%),
+    linear-gradient(112deg, transparent 47.4%, rgba(125, 255, 90, 0.22) 48%, transparent 48.7%),
+    linear-gradient(112deg, transparent 53.4%, rgba(255, 110, 220, 0.16) 54%, transparent 54.7%),
+    linear-gradient(112deg, transparent 59.4%, rgba(160, 255, 245, 0.14) 60%, transparent 60.7%),
+    linear-gradient(112deg, transparent 65.4%, rgba(57, 255, 100, 0.2) 66%, transparent 66.7%);
+  filter: blur(1.2px);
 }
 .landing-inner {
   text-align: center;
   padding: 24px;
-  max-width: 760px;
+  max-width: 780px;
+  position: relative;
+  z-index: 1;
 }
 .land-kicker {
-  font: 600 12px/1 var(--mono);
-  letter-spacing: 0.22em;
+  font: 700 13px/1 var(--mono);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
   color: var(--gold);
   margin-bottom: 18px;
 }
@@ -654,14 +677,14 @@ body.in-world #momentum-hud {
   font: 900 clamp(56px, 11vw, 108px) / 0.95 var(--sans);
   letter-spacing: 0.06em;
   text-transform: lowercase;
-  color: var(--ink);
-  text-shadow: 0 4px 40px rgba(240, 123, 27, 0.35), 0 2px 6px rgba(0, 0, 0, 0.8);
+  color: var(--neon);
+  text-shadow: 0 0 46px rgba(57, 255, 100, 0.5), 0 4px 26px rgba(43, 214, 74, 0.35), 0 2px 6px rgba(0, 0, 0, 0.85);
 }
 .brand-sub {
-  margin-top: 12px;
-  font: 600 15px/1.4 var(--mono);
-  letter-spacing: 0.12em;
-  color: var(--gold);
+  margin-top: 14px;
+  font: 800 clamp(16px, 2.6vw, 24px) / 1.35 var(--sans);
+  letter-spacing: 0.1em;
+  color: var(--ink);
 }
 .brand-tag {
   margin-top: 8px;
@@ -672,8 +695,8 @@ body.in-world #momentum-hud {
   margin-top: 30px;
 }
 .cta {
-  background: linear-gradient(180deg, var(--gold-2), var(--gold));
-  color: #1a1206;
+  background: linear-gradient(180deg, var(--neon-2), #23c246);
+  color: #04140a;
   border: none;
   border-radius: 12px;
   font: 800 17px/1 var(--sans);
@@ -681,12 +704,12 @@ body.in-world #momentum-hud {
   text-transform: lowercase;
   padding: 16px 42px;
   cursor: pointer;
-  box-shadow: 0 8px 30px -8px rgba(226, 177, 59, 0.6);
+  box-shadow: 0 8px 34px -8px rgba(57, 255, 100, 0.65);
   transition: transform 0.12s, box-shadow 0.12s;
 }
 .cta:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 36px -8px rgba(226, 177, 59, 0.75);
+  box-shadow: 0 12px 42px -8px rgba(57, 255, 100, 0.85);
 }
 .land-feats {
   margin-top: 26px;
@@ -767,7 +790,7 @@ body.in-world #momentum-hud {
   margin-bottom: 6px;
 }
 .st-name:focus {
-  border-color: var(--gold);
+  border-color: var(--neon);
 }
 .st-label {
   font: 600 10px/1 var(--mono);
@@ -794,8 +817,8 @@ body.in-world #momentum-hud {
   transform: translateY(-2px);
 }
 .st-swatch.active {
-  border-color: var(--gold-2);
-  box-shadow: 0 0 10px rgba(255, 210, 74, 0.45);
+  border-color: var(--neon);
+  box-shadow: 0 0 10px rgba(57, 255, 100, 0.5);
 }
 .st-optrow {
   display: flex;
@@ -817,8 +840,8 @@ body.in-world #momentum-hud {
   color: var(--ink);
 }
 .st-opt.active {
-  border-color: var(--gold);
-  color: var(--gold-2);
+  border-color: var(--neon);
+  color: var(--neon-2);
 }
 .st-opt.locked {
   opacity: 0.45;
@@ -874,7 +897,7 @@ body.in-world #momentum-hud {
 }
 .boot-tag {
   font: 500 11px/1 var(--mono);
-  color: var(--gold);
+  color: var(--neon);
 }
 .boot-log {
   min-height: 150px;
@@ -887,7 +910,7 @@ body.in-world #momentum-hud {
   gap: 12px;
 }
 .b-arrow {
-  color: var(--gold);
+  color: var(--neon);
   margin-right: 7px;
 }
 .b-ok {
@@ -900,7 +923,7 @@ body.in-world #momentum-hud {
 .b-cursor {
   width: 8px;
   height: 13px;
-  background: var(--gold);
+  background: var(--neon);
   display: inline-block;
   animation: blink 1s steps(1) infinite;
 }
@@ -925,7 +948,7 @@ body.in-world #momentum-hud {
 #boot-bar-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  background: linear-gradient(90deg, #1a7a34, var(--neon), var(--gold-2));
   transition: width 0.2s;
 }
 .boot-pct {

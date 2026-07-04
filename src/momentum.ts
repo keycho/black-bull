@@ -29,9 +29,10 @@ export interface Stats {
   golden: number; // golden bulls claimed
   events: number; // event wins (king bounties, king survivals)
   bears: number; // bears rammed out of the world
+  whites: number; // white bulls broken
 }
 
-const DEFAULT_STATS: Stats = { rams: 0, wipeouts: 0, best: 0, alphaS: 0, golden: 0, events: 0, bears: 0 };
+const DEFAULT_STATS: Stats = { rams: 0, wipeouts: 0, best: 0, alphaS: 0, golden: 0, events: 0, bears: 0, whites: 0 };
 
 export function loadStats(): Stats {
   try {
@@ -150,6 +151,11 @@ export class Momentum {
   }
   noteBear() {
     this.stats.bears++;
+    this.persistSoon();
+    this.onUnlockCheck?.();
+  }
+  noteWhite() {
+    this.stats.whites++;
     this.persistSoon();
     this.onUnlockCheck?.();
   }

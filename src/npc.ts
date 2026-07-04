@@ -1,15 +1,17 @@
-// black bull - npcs: the ambient wild herd, the golden herd event bulls, and
-// the invading bears. HOST-AUTHORITATIVE: the host (lowest id present) runs
-// every npc brain and broadcasts snapshots; everyone else renders + interpolates
-// the same herd. ramming an npc is claimed through the host (first come wins),
-// which broadcasts the removal + credit, so a golden bull can never be claimed
-// twice. bear swipes are relayed to the victim as npc shoves (no player credit).
+// black bull - npcs: the ambient wild herd, the golden herd event bulls, the
+// invading bears, and the WHITE BULLS - the hostile herd. HOST-AUTHORITATIVE:
+// the host (lowest id present) runs every npc brain and broadcasts snapshots;
+// everyone else renders + interpolates the same herd. ramming an npc is claimed
+// through the host (first come wins), which broadcasts removals + credit.
 //
-// brains are deliberately simple steering (wander / flee / chase + water
-// avoidance) - npcs exist to be rammed, not to win.
+// white bulls are the fight: they roam in packs, aggro on riders, telegraph a
+// wind-up (head down, pawing) and then commit to a straight charge - dodge the
+// line and counter-ram them in the recovery window. they take several rams to
+// break; each hit staggers them back. their shoves are relayed to the victim
+// as npc rams (no player credit).
 
 import * as THREE from "three";
-import { BullModel } from "./bullmodel";
+import { BullModel, type BullPose } from "./bullmodel";
 import {
   BEAR_SWIPE_KB,
   BEAR_SWIPE_R,
@@ -17,6 +19,14 @@ import {
   KB_UP,
   NPC_SYNC_HZ,
   SEA,
+  WHITE_AGGRO_R,
+  WHITE_CHARGE_SPEED,
+  WHITE_CHARGE_T,
+  WHITE_COOLDOWN,
+  WHITE_COUNT,
+  WHITE_HP,
+  WHITE_KB,
+  WHITE_WINDUP,
   WILD_HERD,
 } from "./config";
 import type { Net, NpcRow } from "./net";
@@ -27,9 +37,17 @@ import type { World } from "./world";
 export const NPC_WILD = 0;
 export const NPC_GOLDEN = 1;
 export const NPC_BEAR = 2;
+export const NPC_WHITE = 3;
 
-const SPEED = [3.6, 9.5, 6.8]; // per type
-const FLEE_R = [7, 16, 0];
+const SPEED = [3.6, 9.5, 6.8, 7.2]; // run speed per type (white charge speed is its own)
+const FLEE_R = [7, 16, 0, 0];
+
+// npc wire states (rides the snapshot rows so every client animates the same)
+const ST_AMBLE = 0;
+const ST_RUN = 1;
+const ST_WINDUP = 2;
+const ST_CHARGING = 3;
+const ST_STUNNED = 4;
 
 interface Npc {
   id: number;
@@ -38,10 +56,16 @@ interface Npc {
   y: number;
   z: number;
   yaw: number;
-  state: number; // 0 amble, 1 run
+  state: number;
   // host sim
   wanderT: number;
   swipeT: number;
+  stateT: number; // windup / charge / stun timer
+  cdT: number; // charge cooldown (the counter window)
+  hp: number;
+  cdx: number; // committed charge direction
+  cdz: number;
+  hitThisCharge: boolean;
   // render
   model: BullModel | BearModel;
   pos: THREE.Vector3;
@@ -119,7 +143,7 @@ export class NpcManager {
   private syncT = 0;
   private respawnT = 0;
   // main wires these
-  onLocalShove?: (dx: number, dz: number, kb: number, up: number) => void; // a bear swiped the local player
+  onLocalShove?: (dx: number, dz: number, kb: number, up: number) => void; // an npc hit the local player
   getPlayers?: () => { id: string; x: number; y: number; z: number; local: boolean }[];
 
   constructor(
@@ -129,7 +153,7 @@ export class NpcManager {
     private fx: Particles
   ) {
     this.net.onNpcs = (rows) => this.applyRows(rows);
-    this.net.onNpcHit = (id, by, pw) => this.resolveHit(id, by, pw);
+    this.net.onNpcHit = (id, by, pw, dx, dz) => this.resolveHit(id, by, pw, dx, dz);
     this.net.onNpcGone = (id, by, x, y, z, ty) => this.applyGone(id, by, x, y, z, ty);
   }
 
@@ -166,6 +190,7 @@ export class NpcManager {
     } else {
       const bm = new BullModel(this.scene, false);
       if (ty === NPC_GOLDEN) bm.setCoatHex(0xd6a129, 0x8a5c00);
+      else if (ty === NPC_WHITE) bm.setCoatHex(0xd8d2c8);
       else bm.setCoatHex(0x4c3a26);
       bm.setName("");
       model = bm;
@@ -178,9 +203,15 @@ export class NpcManager {
       y,
       z,
       yaw,
-      state: 0,
+      state: ST_AMBLE,
       wanderT: 0,
       swipeT: 0,
+      stateT: 0,
+      cdT: 1 + Math.random() * 2,
+      hp: ty === NPC_WHITE ? WHITE_HP : 1,
+      cdx: 0,
+      cdz: 0,
+      hitThisCharge: false,
       model,
       pos: new THREE.Vector3(x, y, z),
       target: new THREE.Vector3(x, y, z),
@@ -196,6 +227,19 @@ export class NpcManager {
       const r = 90 + Math.random() * 240;
       const ang = a + (Math.random() - 0.5) * 0.9;
       this.spawnAt(NPC_WILD, Math.cos(ang) * r, Math.sin(ang) * r);
+    }
+  }
+  // seed the hostile white packs around the mid-ring (host only; tops up)
+  hostSeedWhite() {
+    if (!this.net.isHost) return;
+    while (this.count(NPC_WHITE) < WHITE_COUNT) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = 115 + Math.random() * 210;
+      const cx = Math.cos(ang) * r;
+      const cz = Math.sin(ang) * r;
+      for (let i = 0; i < 3 && this.count(NPC_WHITE) < WHITE_COUNT; i++) {
+        this.spawnAt(NPC_WHITE, cx + (Math.random() - 0.5) * 12, cz + (Math.random() - 0.5) * 12);
+      }
     }
   }
   // bear invasion: spawn n bears around the zone edge (host only)
@@ -227,13 +271,27 @@ export class NpcManager {
   }
 
   // a local (or relayed) ram on an npc. host resolves; non-host asks the host.
-  ramNpc(id: number, power: number) {
-    if (this.net.isHost) this.resolveHit(id, this.net.id, power);
-    else this.net.sendNpcHit(id, power);
+  // dx/dz is the push direction (hitter -> npc) so hits stagger whites back.
+  ramNpc(id: number, power: number, dx = 0, dz = 0) {
+    if (this.net.isHost) this.resolveHit(id, this.net.id, power, dx, dz);
+    else this.net.sendNpcHit(id, power, dx, dz);
   }
-  private resolveHit(id: number, by: string, _pw: number) {
+  private resolveHit(id: number, by: string, _pw: number, dx: number, dz: number) {
     const p = this.npcs.get(id);
     if (!p) return; // already claimed - first come wins
+    if (p.ty === NPC_WHITE) {
+      p.hp--;
+      if (p.hp > 0) {
+        // staggered back, briefly stunned - the counter window pays off
+        p.state = ST_STUNNED;
+        p.stateT = 0.9;
+        p.cdT = Math.max(p.cdT, 1.4);
+        p.x += dx * 3;
+        p.z += dz * 3;
+        p.y = this.world.voxels.surfaceBelow(p.x, p.z, p.y + 4);
+        return;
+      }
+    }
     this.net.sendNpcGone(id, by, p.pos.x, p.pos.y, p.pos.z, p.ty);
     this.applyGone(id, by, p.pos.x, p.pos.y, p.pos.z, p.ty);
   }
@@ -285,13 +343,38 @@ export class NpcManager {
         if (p.pos.distanceToSquared(p.target) > 144) p.pos.copy(p.target);
         else p.pos.lerp(p.target, k);
       }
-      const speed = p.state === 1 ? SPEED[p.ty] : 0.3;
-      if (p.model instanceof BullModel) p.model.update(dt, now, p.pos, p.yaw, speed, p.state === 1 ? "run" : "idle", 0);
-      else p.model.update(dt, now, p.pos, p.yaw, speed);
-      p.dustT -= dt;
-      if (p.state === 1 && p.dustT <= 0) {
-        p.dustT = 0.12;
-        this.fx.hoofDust(p.pos.x, p.pos.y, p.pos.z, p.yaw, speed, p.ty === NPC_GOLDEN ? 1.1 : 0.7, p.ty === NPC_GOLDEN ? 0xd6a129 : 0x8a7a5e);
+      if (p.model instanceof BullModel) {
+        let pose: BullPose = "idle";
+        let speed = 0.3;
+        let charge = 0;
+        switch (p.state) {
+          case ST_RUN:
+            pose = "run";
+            speed = SPEED[p.ty];
+            break;
+          case ST_WINDUP:
+            pose = "charge";
+            charge = 0.85;
+            break;
+          case ST_CHARGING:
+            pose = "launch";
+            speed = WHITE_CHARGE_SPEED;
+            break;
+          case ST_STUNNED:
+            pose = "stagger";
+            break;
+        }
+        p.model.update(dt, now, p.pos, p.yaw, speed, pose, charge);
+        p.dustT -= dt;
+        if ((p.state === ST_RUN || p.state === ST_CHARGING) && p.dustT <= 0) {
+          p.dustT = p.state === ST_CHARGING ? 0.06 : 0.12;
+          const scale = p.state === ST_CHARGING ? 1.4 : p.ty === NPC_GOLDEN ? 1.1 : 0.7;
+          const hex = p.ty === NPC_GOLDEN ? 0xd6a129 : p.ty === NPC_WHITE ? 0xcfc9bd : 0x8a7a5e;
+          this.fx.hoofDust(p.pos.x, p.pos.y, p.pos.z, p.yaw, speed, scale, hex);
+        }
+        if (p.state === ST_WINDUP) this.fx.chargeDust(p.pos.x, p.pos.y, p.pos.z, 0.7);
+      } else {
+        p.model.update(dt, now, p.pos, p.yaw, p.state === ST_RUN ? SPEED[p.ty] : 0.3);
       }
     }
   }
@@ -299,11 +382,12 @@ export class NpcManager {
   private hostSim(dt: number, now: number) {
     const players = this.getPlayers?.() ?? [];
 
-    // top up the ambient herd every so often
+    // top up the ambient herds every so often
     this.respawnT -= dt;
     if (this.respawnT <= 0) {
       this.respawnT = 20;
       this.hostSeedWild();
+      this.hostSeedWhite();
     }
 
     for (const p of this.npcs.values()) {
@@ -318,14 +402,17 @@ export class NpcManager {
         }
       }
 
+      if (p.ty === NPC_WHITE) {
+        this.simWhite(p, dt, best, bestD, players);
+        continue;
+      }
+
       let wantYaw = p.yaw;
-      p.state = 0;
+      p.state = ST_AMBLE;
       if (p.ty === NPC_BEAR) {
         if (best && bestD < 60) {
-          // chase; face the prey
           wantYaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
-          p.state = bestD > BEAR_SWIPE_R * 0.8 ? 1 : 0;
-          // swipe when in range
+          p.state = bestD > BEAR_SWIPE_R * 0.8 ? ST_RUN : ST_AMBLE;
           p.swipeT -= dt;
           if (bestD < BEAR_SWIPE_R && p.swipeT <= 0) {
             p.swipeT = 1.2;
@@ -341,43 +428,26 @@ export class NpcManager {
             p.wanderT = 2 + Math.random() * 3;
             wantYaw = Math.random() * Math.PI * 2;
           }
-          p.state = 0;
+          p.state = ST_AMBLE;
         }
       } else {
         // wild + golden: graze, flee players
         if (best && bestD < FLEE_R[p.ty]) {
           wantYaw = Math.atan2(-(p.x - best.x), -(p.z - best.z)) + Math.PI; // directly away
-          p.state = 1;
+          p.state = ST_RUN;
         } else {
           p.wanderT -= dt;
           if (p.wanderT <= 0) {
             p.wanderT = 2 + Math.random() * 4;
             p.yaw = Math.random() * Math.PI * 2;
-            p.state = Math.random() < (p.ty === NPC_GOLDEN ? 0.6 : 0.25) ? 1 : 0;
+            p.state = Math.random() < (p.ty === NPC_GOLDEN ? 0.6 : 0.25) ? ST_RUN : ST_AMBLE;
           }
           wantYaw = p.yaw;
-          if (p.state === 0 && p.ty === NPC_GOLDEN) p.state = 1; // golden bulls keep moving
+          if (p.state === ST_AMBLE && p.ty === NPC_GOLDEN) p.state = ST_RUN; // golden bulls keep moving
         }
       }
 
-      // turn + move with water avoidance
-      const d = ((wantYaw - p.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      p.yaw += Math.max(-3 * dt, Math.min(3 * dt, d));
-      if (p.state === 1 || p.ty !== NPC_BEAR) {
-        const sp = (p.state === 1 ? SPEED[p.ty] : 1.2) * dt;
-        const nx = p.x - Math.sin(p.yaw) * sp;
-        const nz = p.z - Math.cos(p.yaw) * sp;
-        const gi = Math.floor(nx + GRID / 2);
-        const gj = Math.floor(nz + GRID / 2);
-        const h = this.world.voxels.topAt(gi, gj);
-        if (h > SEA && Math.abs(h - p.y) < 3.5) {
-          p.x = nx;
-          p.z = nz;
-          p.y = this.world.voxels.surfaceBelow(p.x, p.z, p.y + 3);
-        } else {
-          p.yaw += Math.PI / 2 + Math.random(); // blocked/water: turn away
-        }
-      }
+      this.turnAndMove(p, wantYaw, p.state === ST_RUN ? SPEED[p.ty] : 1.2, dt);
     }
 
     // broadcast snapshots
@@ -390,5 +460,121 @@ export class NpcManager {
       if (rows.length) this.net.sendNpcs(rows);
     }
     void now;
+  }
+
+  // the white bull brain: stalk -> windup (telegraph) -> committed charge ->
+  // recover. the charge direction locks at commit, so sidestep + counter.
+  private simWhite(
+    p: Npc,
+    dt: number,
+    best: { id: string; x: number; y: number; z: number; local: boolean } | null,
+    bestD: number,
+    players: { id: string; x: number; y: number; z: number; local: boolean }[]
+  ) {
+    p.cdT -= dt;
+
+    if (p.state === ST_STUNNED) {
+      p.stateT -= dt;
+      if (p.stateT <= 0) p.state = ST_AMBLE;
+      return;
+    }
+
+    if (p.state === ST_CHARGING) {
+      p.stateT -= dt;
+      const step = WHITE_CHARGE_SPEED * dt;
+      const nx = p.x + p.cdx * step;
+      const nz = p.z + p.cdz * step;
+      const gi = Math.floor(nx + GRID / 2);
+      const gj = Math.floor(nz + GRID / 2);
+      const h = this.world.voxels.topAt(gi, gj);
+      if (h <= SEA || Math.abs(h - p.y) > 3.5 || p.stateT <= 0) {
+        // ran out, hit a wall, or reached water: recover
+        p.state = ST_AMBLE;
+        p.cdT = WHITE_COOLDOWN;
+        return;
+      }
+      p.x = nx;
+      p.z = nz;
+      p.y = this.world.voxels.surfaceBelow(p.x, p.z, p.y + 3);
+      p.yaw = Math.atan2(-p.cdx, -p.cdz);
+      // connect with any rider on the line
+      if (!p.hitThisCharge) {
+        for (const pl of players) {
+          const d = Math.hypot(pl.x - p.x, pl.z - p.z);
+          if (d < 2.3 && Math.abs(pl.y - p.y) < 2.4) {
+            p.hitThisCharge = true;
+            const dx = (pl.x - p.x) / (d || 1);
+            const dz = (pl.z - p.z) / (d || 1);
+            this.fx.impact(pl.x, pl.y + 0.8, pl.z, 0.7, 0xcfc9bd);
+            if (pl.local) this.onLocalShove?.(dx, dz, WHITE_KB, KB_UP);
+            else this.net.sendRam(pl.id, dx, dz, WHITE_KB, KB_UP, pl.x, pl.y + 0.8, pl.z, true);
+            p.state = ST_AMBLE;
+            p.cdT = WHITE_COOLDOWN;
+            break;
+          }
+        }
+      }
+      return;
+    }
+
+    if (p.state === ST_WINDUP) {
+      p.stateT -= dt;
+      // track the target while winding up; the direction LOCKS at commit
+      if (best) p.yaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
+      if (p.stateT <= 0) {
+        if (best && bestD < WHITE_AGGRO_R * 1.4) {
+          const d = bestD || 1;
+          p.cdx = (best.x - p.x) / d;
+          p.cdz = (best.z - p.z) / d;
+          p.state = ST_CHARGING;
+          p.stateT = WHITE_CHARGE_T;
+          p.hitThisCharge = false;
+        } else {
+          p.state = ST_AMBLE;
+          p.cdT = WHITE_COOLDOWN * 0.5;
+        }
+      }
+      return;
+    }
+
+    // stalking / roaming
+    if (best && bestD < WHITE_AGGRO_R) {
+      if (bestD < 16 && p.cdT <= 0) {
+        p.state = ST_WINDUP;
+        p.stateT = WHITE_WINDUP;
+        return;
+      }
+      // close the distance
+      const wantYaw = Math.atan2(-(best.x - p.x), -(best.z - p.z));
+      p.state = ST_RUN;
+      this.turnAndMove(p, wantYaw, SPEED[NPC_WHITE], dt);
+    } else {
+      p.wanderT -= dt;
+      if (p.wanderT <= 0) {
+        p.wanderT = 2 + Math.random() * 4;
+        p.yaw = Math.random() * Math.PI * 2;
+        p.state = Math.random() < 0.3 ? ST_RUN : ST_AMBLE;
+      }
+      this.turnAndMove(p, p.yaw, p.state === ST_RUN ? SPEED[NPC_WHITE] * 0.6 : 1.2, dt);
+    }
+  }
+
+  // shared steering: turn toward wantYaw, walk forward, avoid water/cliffs
+  private turnAndMove(p: Npc, wantYaw: number, speed: number, dt: number) {
+    const d = ((wantYaw - p.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    p.yaw += Math.max(-3 * dt, Math.min(3 * dt, d));
+    const sp = speed * dt;
+    const nx = p.x - Math.sin(p.yaw) * sp;
+    const nz = p.z - Math.cos(p.yaw) * sp;
+    const gi = Math.floor(nx + GRID / 2);
+    const gj = Math.floor(nz + GRID / 2);
+    const h = this.world.voxels.topAt(gi, gj);
+    if (h > SEA && Math.abs(h - p.y) < 3.5) {
+      p.x = nx;
+      p.z = nz;
+      p.y = this.world.voxels.surfaceBelow(p.x, p.z, p.y + 3);
+    } else {
+      p.yaw += Math.PI / 2 + Math.random(); // blocked/water: turn away
+    }
   }
 }

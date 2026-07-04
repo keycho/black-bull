@@ -103,6 +103,19 @@ export const NPC_SYNC_HZ = 8; // host -> everyone npc snapshot rate
 export const BEAR_SWIPE_KB = 15;
 export const BEAR_SWIPE_R = 2.6;
 
+// white bulls: the hostile herd - they hunt riders in packs, telegraph a
+// wind-up, then charge. dodge the line, counter-ram them while they recover.
+export const WHITE_COUNT = 12; // roaming white bulls (packs of ~3)
+export const WHITE_HP = 3; // rams to break one
+export const WHITE_KB = 19; // knockback when one connects with you
+export const WHITE_CHARGE_SPEED = 23;
+export const WHITE_AGGRO_R = 30; // they notice you inside this
+export const WHITE_WINDUP = 0.9; // s of telegraph before the charge commits
+export const WHITE_CHARGE_T = 1.5; // max s a charge runs
+export const WHITE_COOLDOWN = 2.6; // s between charges (the counter window)
+export const M_WHITE = 20; // breaking a white bull
+export const M_WHITE_HIT = 4; // each ram that connects on one
+
 // --- networking ----------------------------------------------------------------
 export const POS_HZ = 15; // local bull state broadcast rate
 export const MAX_REMOTE_SPEED = 60; // receive-side clamp: drop impossible teleports

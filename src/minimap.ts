@@ -22,7 +22,7 @@ export interface MinimapDeps {
 }
 
 const hex6 = (n: number): string => (n & 0xffffff).toString(16).padStart(6, "0");
-const NPC_COLORS = ["#8a6a44", "#ffd24a", "#b0543a"]; // wild / golden / bear
+const NPC_COLORS = ["#8a6a44", "#ffd24a", "#b0543a", "#efe9dc"]; // wild / golden / bear / white
 
 interface MapOpts {
   size: number;
@@ -58,8 +58,8 @@ export class Minimap {
     el.innerHTML =
       `<canvas></canvas><span class="mm-n">n</span>` +
       `<div class="mm-legend"><span class="mm-k" style="--c:#e2b13b">riders</span>` +
-      `<span class="mm-k" style="--c:#ffd24a">golden</span>` +
-      `<span class="mm-k" style="--c:#b0543a">bears</span><span class="mm-x">n · map</span></div>`;
+      `<span class="mm-k" style="--c:#efe9dc">whites</span>` +
+      `<span class="mm-k" style="--c:#ffd24a">golden</span><span class="mm-x">n · map</span></div>`;
     document.body.appendChild(el);
     this.el = el;
     return this.fitCanvas(el.querySelector("canvas") as HTMLCanvasElement, SIZE);
@@ -72,6 +72,7 @@ export class Minimap {
       `<div class="bm-frame"><canvas></canvas></div>` +
       `<div class="bm-bar"><span class="bm-title">the battlefield</span>` +
       `<span class="bm-legend"><span class="mm-k" style="--c:#e2b13b">riders</span>` +
+      `<span class="mm-k" style="--c:#efe9dc">white bulls</span>` +
       `<span class="mm-k" style="--c:#ffd24a">golden herd</span><span class="mm-k" style="--c:#b0543a">bears</span>` +
       `<span class="mm-k" style="--c:#ffe27a">alpha</span></span>` +
       `<span class="bm-close">n / esc to close</span></div>`;

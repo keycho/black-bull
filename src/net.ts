@@ -94,7 +94,7 @@ export class Net {
   onStrike?: (x: number, z: number) => void;
   onMeteor?: (x: number, z: number, r: number, delay: number) => void;
   onNpcs?: (rows: NpcRow[]) => void;
-  onNpcHit?: (npcId: number, by: string, power: number) => void; // host arbitrates
+  onNpcHit?: (npcId: number, by: string, power: number, dx: number, dz: number) => void; // host arbitrates
   onNpcGone?: (npcId: number, by: string, x: number, y: number, z: number, ty: number) => void;
   onChat?: (id: string, name: string, text: string) => void;
 
@@ -174,8 +174,8 @@ export class Net {
         this.onNpcs?.(v.e);
       })
       .on("broadcast", { event: "nhit" }, ({ payload }) => {
-        const v = payload as { id: number; by: string; pw: number };
-        if (v && this.isHost) this.onNpcHit?.(v.id, v.by, v.pw); // only the host arbitrates
+        const v = payload as { id: number; by: string; pw: number; dx?: number; dz?: number };
+        if (v && this.isHost) this.onNpcHit?.(v.id, v.by, v.pw, v.dx ?? 0, v.dz ?? 0); // only the host arbitrates
       })
       .on("broadcast", { event: "ngone" }, ({ payload }) => {
         const v = payload as { h: string; id: number; by: string; x: number; y: number; z: number; ty: number };
@@ -276,9 +276,9 @@ export class Net {
   sendNpcs(rows: NpcRow[]) {
     this.channel?.send({ type: "broadcast", event: "npcs", payload: { h: this.id, e: rows } });
   }
-  // non-host -> host: i rammed npc `id` this hard
-  sendNpcHit(id: number, power: number) {
-    this.channel?.send({ type: "broadcast", event: "nhit", payload: { id, by: this.id, pw: power } });
+  // non-host -> host: i rammed npc `id` this hard, pushing along dx/dz
+  sendNpcHit(id: number, power: number, dx = 0, dz = 0) {
+    this.channel?.send({ type: "broadcast", event: "nhit", payload: { id, by: this.id, pw: power, dx, dz } });
   }
   // host -> everyone: npc `id` is out (rammed away / claimed), credit `by`
   sendNpcGone(id: number, by: string, x: number, y: number, z: number, ty: number) {

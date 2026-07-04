@@ -199,9 +199,9 @@ export class Particles {
     }
   }
 
-  // a cosmetic trail puff behind a fast bull (trail id: 1 lightning, 2 fire)
+  // a cosmetic trail puff behind a fast bull (1 lightning, 2 fire, 3 toxic)
   trail(x: number, y: number, z: number, kind: number) {
-    const hex = kind === 1 ? 0x7fd9ff : 0xff7327;
+    const hex = kind === 1 ? 0x7fd9ff : kind === 3 ? 0x39ff64 : 0xff7327;
     this.glow.spawn(
       x + (Math.random() - 0.5) * 0.8, y + 0.6 + Math.random() * 0.8, z + (Math.random() - 0.5) * 0.8,
       (Math.random() - 0.5) * 1.5, 0.5 + Math.random() * 1.5, (Math.random() - 0.5) * 1.5,
