@@ -30,8 +30,8 @@ import { type Cosmetics, DEFAULT_COSMETICS } from "./bullmodel";
 // to connect black bull to the pokecraft / biomes supabase project, paste that
 // project's url + anon key (Project Settings -> API) into these two constants.
 // env vars still override them when set, so a deploy can point elsewhere.
-const DEFAULT_SUPABASE_URL = "";
-const DEFAULT_SUPABASE_ANON_KEY = "";
+const DEFAULT_SUPABASE_URL = "https://mncdmattzurulkheozyy.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_n8maH8pWpCmj47HnnQqBWA_DX48rBFy";
 const URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 // its OWN room, namespaced so bull riders never collide with pokecraft players
