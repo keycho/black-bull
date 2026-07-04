@@ -1,13 +1,14 @@
-// black bull - player chat. a proper bordered box (bottom-left): a header, a scrollable
-// message log, and an always-visible input row. press enter to focus + type, enter to
-// send, esc to cancel. messages ride the public realtime broadcast plane (net.sendChat);
-// incoming ones arrive via net.onChat, own messages echo locally (broadcast is
-// self:false). every name + body is html-escaped before it touches the dom, length-
-// capped, and sends are rate-limited. focusing the box releases pointer lock so typing
-// works (and movement halts) + stops key propagation so hotkeys do not fire while typing.
+// black bull - player chat. a SLIM bottom-left overlay: a few recent lines
+// over the world and a tiny "enter · chat" hint. press enter to open the
+// input, enter to send, esc to cancel; the box only grows while typing.
+// messages ride the public realtime broadcast plane (net.sendChat); incoming
+// ones arrive via net.onChat, own messages echo locally (broadcast is
+// self:false, and solo play echoes too). every name + body is html-escaped,
+// length-capped, and sends are rate-limited. focusing the box releases
+// pointer lock so typing works + stops key propagation so hotkeys stay quiet.
 
 interface ChatDeps {
-  canUse: () => boolean; // chat allowed (lobby or playing)
+  canUse: () => boolean; // chat allowed (in the world)
   inWorld: () => boolean; // playing (re-lock the pointer when you finish typing)
   self: () => { name: string; color: number };
   send: (text: string) => string; // net.sendChat; returns the trimmed text sent, or ""
@@ -40,9 +41,9 @@ export class Chat {
     const root = document.createElement("div");
     root.id = "chat";
     root.innerHTML =
-      `<div class="chat-head">room chat</div>` +
       `<div class="chat-log"></div>` +
-      `<input class="chat-input" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="press enter to chat" />`;
+      `<input class="chat-input" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="say something" />` +
+      `<div class="chat-hint">enter · chat</div>`;
     document.body.appendChild(root);
     this.root = root;
     this.logEl = root.querySelector(".chat-log");
@@ -65,8 +66,24 @@ export class Chat {
 
   private focusInput() {
     if (!this.inputEl) return;
-    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch { /* ignore */ } }
-    this.inputEl.focus();
+    // reveal the box BEFORE focusing - anything display:none cannot take focus
+    this.root?.classList.add("show");
+    this.root?.classList.add("typing");
+    const doFocus = () => {
+      if (this.root?.classList.contains("typing")) this.inputEl?.focus();
+    };
+    if (document.pointerLockElement) {
+      // releasing pointer lock is async in some browsers; focus can be refused
+      // until it actually lets go, so retry on the change event + a timer
+      try { document.exitPointerLock(); } catch { /* ignore */ }
+      const once = () => {
+        document.removeEventListener("pointerlockchange", once);
+        doFocus();
+      };
+      document.addEventListener("pointerlockchange", once);
+      window.setTimeout(doFocus, 90);
+    }
+    doFocus();
   }
 
   private onInputKey(e: KeyboardEvent) {
@@ -93,6 +110,7 @@ export class Chat {
   }
 
   private dismiss() {
+    this.root?.classList.remove("typing");
     this.inputEl?.blur();
     if (this.d.inWorld()) { try { document.body.requestPointerLock(); } catch { /* ignore */ } }
   }
@@ -122,24 +140,24 @@ export class Chat {
     const st = document.createElement("style");
     st.id = "blackbull-chat-style";
     st.textContent = `
-#chat{position:fixed;left:12px;bottom:50px;width:min(340px,46vw);z-index:39;display:none;flex-direction:column;
- background:rgba(6,12,15,.66);border:1px solid #15363a;border-radius:9px;box-shadow:0 10px 30px -12px rgba(0,0,0,.8);
- font-family:ui-monospace,Menlo,Consolas,monospace;overflow:hidden;pointer-events:auto}
+#chat{position:fixed;left:12px;bottom:14px;width:min(240px,42vw);z-index:39;display:none;flex-direction:column;
+ font-family:ui-monospace,Menlo,Consolas,monospace;pointer-events:none}
 #chat.show{display:flex}
-#chat.typing{background:rgba(7,14,17,.92);border-color:#2fe6c2}
-#chat .chat-head{color:#3a8f86;font-size:9px;letter-spacing:.2em;text-transform:uppercase;padding:7px 11px 5px}
-#chat .chat-log{display:flex;flex-direction:column;gap:2px;height:122px;overflow-y:auto;padding:0 11px 7px;
- scrollbar-width:thin;scrollbar-color:#1c4a44 transparent}
-#chat .chat-log::-webkit-scrollbar{width:6px}
-#chat .chat-log::-webkit-scrollbar-thumb{background:#1c4a44;border-radius:3px}
-#chat .chat-line{font-size:12.5px;line-height:1.4;text-shadow:0 1px 2px rgba(0,0,0,.6);word-break:break-word}
-#chat .chat-name{font-weight:700;margin-right:6px}
+#chat .chat-log{display:flex;flex-direction:column;gap:1px;max-height:58px;overflow-y:auto;padding:2px 0;
+ scrollbar-width:none;mask-image:linear-gradient(180deg,transparent 0,#000 18%)}
+#chat .chat-log::-webkit-scrollbar{display:none}
+#chat.typing .chat-log{max-height:110px;background:rgba(5,10,6,.82);border:1px solid #1e3020;border-radius:8px 8px 0 0;padding:6px 9px}
+#chat .chat-line{font-size:11px;line-height:1.35;text-shadow:0 1px 2px rgba(0,0,0,.85);word-break:break-word}
+#chat .chat-name{font-weight:700;margin-right:5px}
 #chat .chat-name::after{content:":"}
-#chat .chat-text{color:#e6f0f2}
-#chat .chat-input{pointer-events:auto;background:#0a161a;border:none;border-top:1px solid #15363a;color:#eafff8;
- font:inherit;font-size:13px;padding:9px 11px;outline:none}
-#chat .chat-input::placeholder{color:#54767c}
-#chat.typing .chat-input{background:#0c1c21}
+#chat .chat-text{color:#e9f2e9}
+#chat .chat-input{display:none;pointer-events:auto;background:rgba(5,10,6,.92);border:1px solid #1e3020;border-top:none;
+ border-radius:0 0 8px 8px;color:#eaffef;font:inherit;font-size:12px;padding:7px 9px;outline:none}
+#chat.typing .chat-input{display:block;border-color:#39ff64}
+#chat.typing .chat-log{border-color:#39ff64;border-bottom:none}
+#chat .chat-input::placeholder{color:#547c5e}
+#chat .chat-hint{margin-top:3px;font-size:9px;letter-spacing:.12em;color:#54685a;text-shadow:0 1px 2px rgba(0,0,0,.8)}
+#chat.typing .chat-hint{display:none}
 `;
     document.head.appendChild(st);
   }

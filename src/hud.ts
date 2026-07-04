@@ -43,7 +43,13 @@ export class Hud {
     this.chargeEl.classList.toggle("winded", winded);
     this.chargeEl.classList.toggle("full", charging && v >= 1);
     this.chargeFill.style.width = Math.round(v * 100) + "%";
-    this.chargeLabel.textContent = winded ? "winded" : charging ? (v >= 1 ? "stampede ready" : "charging") : "hold to charge";
+    this.chargeLabel.textContent = winded
+      ? "winded - recover"
+      : charging
+        ? v >= 1
+          ? "stampede ready - release"
+          : "charging - release to ram"
+        : "hold left mouse or f to charge";
   }
 
   setMomentum(value: number, tier: number, isAlpha: boolean) {

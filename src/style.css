@@ -358,6 +358,31 @@ body.in-world #momentum-hud {
   display: block;
 }
 
+/* ---------------- first-ride how-to ---------------- */
+#howto {
+  position: fixed;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  display: none;
+  max-width: min(620px, 90vw);
+  text-align: center;
+  font: 500 12px/1.6 var(--mono);
+  color: var(--ink);
+  background: var(--hud-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 16px;
+  pointer-events: none;
+}
+#howto.show {
+  display: block;
+}
+#howto b {
+  color: var(--neon);
+}
+
 /* ---------------- biome label ---------------- */
 #biome-label {
   position: fixed;

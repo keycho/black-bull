@@ -441,13 +441,22 @@ const fpsNumEl = fpsEl?.querySelector(".fps-num") as HTMLElement | null;
 
 function syncLockUI(stage: string) {
   const locked = !!document.pointerLockElement;
-  lockEl?.classList.toggle("hidden", locked || stage !== "playing");
+  // in fallback-controls mode (pointer lock unavailable) the prompt stays away
+  lockEl?.classList.toggle("hidden", locked || stage !== "playing" || bull.lockBroken);
 }
+let howtoShown = false;
 function syncStageUI(stage: string) {
   document.body.classList.toggle("playing", stage === "playing");
   hud.setVisible(stage === "playing");
   audio.setStage(stage);
   syncLockUI(stage);
+  // teach the fight on the first ride
+  if (stage === "playing" && !howtoShown) {
+    howtoShown = true;
+    const el = document.getElementById("howto");
+    el?.classList.add("show");
+    window.setTimeout(() => el?.classList.remove("show"), 24000);
+  }
 }
 
 const flow = new Flow({
@@ -526,9 +535,10 @@ window.addEventListener("keydown", (e) => {
 const inCinematic = () => cine.active;
 bull.setInputGate(() => !cine.active);
 
-// chat: enter to type, rides the public broadcast plane
+// chat: enter to type, rides the public broadcast plane. in-world only, so
+// enter in the stable deploys instead of fighting the chat for the key.
 const chat = new Chat({
-  canUse: () => flow.stage === "playing" || flow.stage === "stable",
+  canUse: () => flow.stage === "playing",
   inWorld: () => flow.stage === "playing",
   self: () => ({ name: net.myName, color: net.myColor }),
   send: (t) => net.sendChat(t),
@@ -537,6 +547,22 @@ net.onChat = (id, name, text) => {
   const r = net.remotes.get(id);
   chat.add(name, text, r ? [0xe23b3b, 0xf5c542, 0x3b82f6, 0x21c07a, 0x9b51e0, 0xf07b1b][r.cos.trim % 6] : 0xf0dcb4);
 };
+
+// read-only debug handle for automated playtests (?bbdebug in the url).
+// exposes nothing a client does not already own - purely observational.
+if (location.search.includes("bbdebug")) {
+  (window as unknown as Record<string, unknown>).__bb = {
+    state: () => ({
+      st: bull.state,
+      locked: bull.locked,
+      broken: bull.lockBroken,
+      pos: [Math.round(bull.pos.x), Math.round(bull.pos.y), Math.round(bull.pos.z)],
+      speed: Math.round(bull.speed * 10) / 10,
+      charge: bull.charge01,
+      m: momentum.value,
+    }),
+  };
+}
 
 // minimap: riders, npcs, alpha, king, event zone over the biome backdrop
 let alphaId = "";
@@ -563,6 +589,7 @@ let mmAccum = 0;
 // ---------------------------------------------------------------------------
 let last = performance.now();
 let landingFrames = 0;
+let lockNoticeShown = false;
 let fpsShown = true;
 let fpsAccum = 0;
 let fpsFrames = 0;
@@ -719,7 +746,14 @@ function frame(now: number) {
       }
     }
   }
-  chat.setVisible((stage === "stable" || playing) && !inCinematic());
+  chat.setVisible(playing && !inCinematic());
+  // pointer lock gave up somewhere along the way: tell the player once that
+  // keyboard mode is on so the game never reads as "mouse does nothing"
+  if (bull.lockBroken && !lockNoticeShown && playing) {
+    lockNoticeShown = true;
+    fx.toast("mouse lock unavailable - keyboard mode: a/d steer, hold f to charge", "warn");
+    syncLockUI(stage);
+  }
   if (netEl) {
     const showNet = net.enabled && (stage === "stable" || playing);
     netEl.classList.toggle("show", showNet);

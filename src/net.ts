@@ -332,11 +332,13 @@ export class Net {
     }
   }
 
-  // chat rides the public broadcast plane; own messages echo locally.
+  // chat rides the public broadcast plane; own messages echo locally. with no
+  // channel (solo play) the broadcast is skipped but the echo still happens,
+  // so chat always visibly works.
   sendChat(text: string): string {
     const t = text.replace(/\s+/g, " ").trim().slice(0, 160);
-    if (!t || !this.channel) return "";
-    this.channel.send({ type: "broadcast", event: "chat", payload: { id: this.id, name: this.myName, text: t } });
+    if (!t) return "";
+    this.channel?.send({ type: "broadcast", event: "chat", payload: { id: this.id, name: this.myName, text: t } });
     return t;
   }
 

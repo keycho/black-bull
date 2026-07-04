@@ -96,8 +96,15 @@ export class Bull {
   onLandHard?: (impact: number) => void;
   onHazard?: (kind: "water" | "lava") => void;
 
+  // pointer lock is the ideal, but some browsers/setups deny it. when that
+  // happens we flip into FALLBACK CONTROLS: keys + charge work without the
+  // lock and the camera auto-follows behind the bull, so the game is always
+  // playable. any later successful lock switches back to mouse-look.
+  lockBroken = false;
+
   private keys = new Set<string>();
   private mouseDown = false;
+  private unlockedT = 0; // time spent unlocked while playing (arms the fallback)
   private stateT = 0; // time left in a timed state (stagger/tumble/winded/ko)
   private cooldownT = 0;
   private lavaT = 0;
@@ -123,10 +130,16 @@ export class Bull {
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
     document.addEventListener("pointerlockchange", () => {
       this.locked = !!document.pointerLockElement;
-      if (!this.locked) {
+      if (this.locked) {
+        this.lockBroken = false;
+        this.unlockedT = 0;
+      } else {
         this.keys.clear();
         this.mouseDown = false;
       }
+    });
+    document.addEventListener("pointerlockerror", () => {
+      this.lockBroken = true;
     });
     window.addEventListener("mousemove", (e) => {
       if (!this.locked) return;
@@ -135,7 +148,10 @@ export class Bull {
       this.camPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.camPitch));
     });
     window.addEventListener("mousedown", (e) => {
-      if (e.button === 0 && this.locked) this.mouseDown = true;
+      if (e.button !== 0) return;
+      if (this.locked || this.lockBroken) this.mouseDown = true;
+      // in fallback, quietly keep trying for a real lock on each click
+      if (this.lockBroken && !this.locked) this.requestLock();
     });
     window.addEventListener("mouseup", (e) => {
       if (e.button === 0) this.mouseDown = false;
@@ -143,10 +159,18 @@ export class Bull {
   }
 
   requestLock() {
-    document.body.requestPointerLock();
+    try {
+      document.body.requestPointerLock();
+    } catch {
+      this.lockBroken = true;
+    }
   }
   setInputGate(fn: () => boolean) {
     this.inputOn = fn;
+  }
+  // input works when locked, or in fallback mode
+  get inputLive(): boolean {
+    return this.locked || this.lockBroken;
   }
 
   // the pose the model should show this frame
@@ -300,7 +324,21 @@ export class Bull {
   update(dt: number) {
     dt = Math.min(dt, 0.05);
     this.landImpact = 0;
-    const allow = this.inputOn() && this.locked;
+    // unlocked for more than a beat while nothing is being typed: arm the
+    // fallback controls so the game never sits dead (any later successful
+    // lock - e.g. clicking the prompt - switches straight back to mouse-look)
+    const typing = !!document.activeElement && /input|textarea|select/i.test(document.activeElement.tagName);
+    if (!this.locked && !typing) {
+      this.unlockedT += dt;
+      if (this.unlockedT > 1.2) this.lockBroken = true;
+    } else {
+      this.unlockedT = 0;
+    }
+    const allow = this.inputOn() && this.inputLive;
+    // fallback camera: no mouse-look, so the chase cam settles in behind the bull
+    if (this.lockBroken && !this.locked) {
+      this.camYaw = lerpAngle(this.camYaw, this.yaw, 1 - Math.exp(-dt * 1.8));
+    }
 
     // timed states tick down
     if (this.stateT > 0) {
@@ -318,9 +356,11 @@ export class Bull {
     if (this.cooldownT > 0) this.cooldownT -= dt;
 
     const controllable = this.state === "run" || this.state === "charging" || this.state === "winded";
+    // hold left mouse OR f to charge (keyboard works even if the mouse is fussy)
+    const chargeHeld = this.mouseDown || this.keys.has("KeyF");
 
     // --- charge wind-up / release ---
-    if (allow && controllable && this.state !== "winded" && this.mouseDown && this.cooldownT <= 0) {
+    if (allow && controllable && this.state !== "winded" && chargeHeld && this.cooldownT <= 0) {
       if (this.state !== "charging") {
         this.state = "charging";
         this.charge01 = 0;
@@ -351,8 +391,13 @@ export class Bull {
     const speedFrac = Math.min(1, this.speed / (GALLOP * 1.4));
 
     if (this.state === "charging") {
-      // aiming: the body swings to the camera line while the wind-up builds
-      this.yaw = lerpAngle(this.yaw, this.camYaw, 1 - Math.exp(-dt * 7));
+      if (this.lockBroken && !this.locked) {
+        // fallback aiming: steer the wind-up directly with a/d
+        this.yaw -= strKey * TURN_RATE * dt;
+      } else {
+        // aiming: the body swings to the camera line while the wind-up builds
+        this.yaw = lerpAngle(this.yaw, this.camYaw, 1 - Math.exp(-dt * 7));
+      }
     } else if (this.state === "launched") {
       // limited steering authority mid-launch (drift the stampede)
       if (allow && strKey !== 0) this.yaw -= strKey * TURN_RATE_FAST * LAUNCH_STEER * dt;

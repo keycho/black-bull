@@ -17,7 +17,7 @@ import { SEA } from "./config";
 export const HUD_IDS = [
   "net-status", "fx-layer", "toast-stack", "impact-flash", "charge-hud",
   "momentum-hud", "event-banner", "event-chip", "alpha-banner", "ko-overlay",
-  "biome-label", "fps-hud", "minimap", "chat", "bigmap", "audio-ctl",
+  "biome-label", "howto", "fps-hud", "minimap", "chat", "bigmap", "audio-ctl",
 ];
 
 // a keyframe: time (seconds), camera position, look-at target, and bank/roll.
