@@ -61,6 +61,22 @@ export interface EventMsg {
   seed: number;
 }
 
+// one pvp duel message. rides the public broadcast plane; the duel manager
+// filters by `to`. friendly only - no money, no wager (that stays out by design).
+export interface DuelMsg {
+  t: "challenge" | "accept" | "decline" | "cancel" | "hit" | "hp" | "end" | "ladder";
+  from: string; // sender id (stamped by sendDuel)
+  to?: string; // addressed recipient
+  name?: string; // sender display name
+  cx?: number; cz?: number; ax?: number; az?: number; // arena centre + facing axis (challenge)
+  dmg?: number; // ram stamina damage (already capped by the attacker)
+  hp?: number; // sender stamina fraction 0..1
+  winner?: string; loser?: string; // result display names
+  streak?: number; // winner's running streak (ladder)
+  rating?: number; // sender's ladder rating (exchanged in the handshake + ladder)
+  reason?: string; // why a challenge was auto-declined
+}
+
 export class Net {
   enabled = false;
   readonly id: string;
@@ -97,6 +113,7 @@ export class Net {
   onNpcHit?: (npcId: number, by: string, power: number, dx: number, dz: number) => void; // host arbitrates
   onNpcGone?: (npcId: number, by: string, x: number, y: number, z: number, ty: number) => void;
   onChat?: (id: string, name: string, text: string) => void;
+  onDuel?: (m: DuelMsg) => void; // a pvp duel message (challenge / accept / hit / result)
 
   constructor() {
     this.id = globalThis.crypto?.randomUUID?.() ?? "p" + Math.random().toString(36).slice(2, 10);
@@ -186,6 +203,10 @@ export class Net {
         const v = payload as { id?: string; name?: string; text?: string };
         if (!v || v.id === this.id || typeof v.text !== "string") return;
         this.onChat?.(v.id ?? "", v.name ?? "rider", v.text);
+      })
+      .on("broadcast", { event: "duel" }, ({ payload }) => {
+        const v = payload as DuelMsg;
+        if (v && v.from !== this.id) this.onDuel?.(v); // skip our own echo; the manager routes it
       })
       .on("presence", { event: "sync" }, () => this.syncPresence())
       .on("presence", { event: "leave" }, ({ key }) => this.drop(key as string))
@@ -330,6 +351,12 @@ export class Net {
     } catch (e) {
       console.warn("[net] load world delta error:", e);
     }
+  }
+
+  // pvp duels: challenge / accept / hit / result over the public broadcast plane.
+  // the duel manager stamps `from` and filters by `to`.
+  sendDuel(m: Omit<DuelMsg, "from">) {
+    this.channel?.send({ type: "broadcast", event: "duel", payload: { ...m, from: this.id } });
   }
 
   // chat rides the public broadcast plane; own messages echo locally. with no

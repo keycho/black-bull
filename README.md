@@ -27,6 +27,10 @@ built with three.js + typescript + vite, multiplayer over supabase realtime.
 - **the alpha bull.** whoever holds the most momentum wears a floating golden
   crown with a light beam, visible across the map. surviving as alpha builds
   score. the whole server naturally hunts them.
+- **1v1 duels.** ride up to another rider and press u to challenge them: both
+  warp into a glowing ring and fight with the charge system, each ram draining
+  the other's stamina until one breaks. an elo ladder + win streak give it the
+  bragging-rights loop (press l). friendly only - no money, no wager, ever.
 - **white bulls.** the hostile herd: they roam in packs, hunt riders,
   telegraph a wind-up and commit to a straight charge - sidestep the line and
   counter-ram them in the recovery window. three hits breaks one; every hit

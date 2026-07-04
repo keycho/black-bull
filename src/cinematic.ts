@@ -19,6 +19,7 @@ export const HUD_IDS = [
   "momentum-hud", "event-banner", "event-chip", "alpha-banner", "ko-overlay",
   "biome-label", "howto", "fps-hud", "minimap", "chat", "bigmap", "audio-ctl",
   "earn-chip", "earn-panel", "xp-pop",
+  "duel-hud", "duel-banner", "duel-prompt", "duel-flash", "duel-ladder",
 ];
 
 // a keyframe: time (seconds), camera position, look-at target, and bank/roll.

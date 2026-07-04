@@ -41,6 +41,7 @@ import {
   WORLD,
 } from "./config";
 import { CATALOG } from "./cosmetics";
+import { Duel } from "./duel";
 import { Earn, EARN } from "./earn";
 import { Events, EVENT_TITLES, type EventKind } from "./events";
 import { fx } from "./feedback";
@@ -206,6 +207,9 @@ function tryLocalRams() {
     momentum.award(M_RAM_MIN + (M_RAM_MAX - M_RAM_MIN) * power01);
     momentum.noteRam();
     earn.award(EARN.ram);
+    // in a duel, a ram on the opponent also drains their stamina (the knockback
+    // above still fires - the shove IS the fight's texture)
+    if (duel.isOpp(id)) duel.dealRam(power01);
     fx.damage(rx, ry + 2.4, rz, Math.round(kb), kb > 30);
   }
 
@@ -552,6 +556,18 @@ window.addEventListener("keydown", (e) => {
 const inCinematic = () => cine.active;
 bull.setInputGate(() => !cine.active && !earn.isOpen);
 
+// pvp duels: challenge a nearby rider (u), fight with rams, climb the ladder (l).
+// friendly only - no money, no wager. you keep riding your bull during the duel,
+// so input is NOT gated; the ram just also drains the opponent's stamina.
+const duel = new Duel({
+  scene,
+  net,
+  bull,
+  myName: () => net.myName,
+  groundAt: (x, z) => world.voxels.surfaceBelow(x, z, 80),
+  canUse: () => flow.stage === "playing" && !inCinematic() && !earn.isOpen,
+});
+
 // chat: enter to type, rides the public broadcast plane. in-world only, so
 // enter in the stable deploys instead of fighting the chat for the key.
 const chat = new Chat({
@@ -570,6 +586,7 @@ net.onChat = (id, name, text) => {
 if (location.search.includes("bbdebug")) {
   (window as unknown as Record<string, unknown>).__bb = {
     state: () => ({
+      id: net.id,
       st: bull.state,
       locked: bull.locked,
       broken: bull.lockBroken,
@@ -582,7 +599,19 @@ if (location.search.includes("bbdebug")) {
         .list()
         .filter((n) => n.ty === NPC_BEAR)
         .map((n) => [Math.round(n.pos.x), Math.round(n.pos.y), Math.round(n.pos.z)]),
+      duel: { phase: duel.phase, oppId: duel.oppId },
     }),
+    // test-only (debug-gated): simulate a second rider + the duel messages a
+    // client would receive over realtime, so the full handshake can be driven
+    // headlessly. injects nothing an honest client could not already receive.
+    injectRemote: (id: string, x: number, z: number, name: string) => {
+      net.remotes.set(id, {
+        id, x, y: bull.pos.y, z, yaw: 0, st: 0, charge: 0, momentum: 0,
+        name, cos: { coat: 0, trim: 0, horns: 0, eyes: 0, trail: 0, hooves: 0, armor: 0, crown: 0, rider: 0 },
+        inWorld: true, t: performance.now(),
+      });
+    },
+    injectDuel: (m: Record<string, unknown>) => net.onDuel?.(m as never),
   };
 }
 
@@ -748,6 +777,8 @@ function frame(now: number) {
   // shared systems tick every frame
   npcs.update(dt, now);
   events.update(dt, now);
+  duel.update(dt, now);
+  if (playing && !inCinematic()) duel.updateProximity();
   particles.update(dt);
   fx.update(dt);
   hud.update(dt);
