@@ -49,7 +49,7 @@ import { Flow, pickSpawn } from "./flow";
 import { Hud } from "./hud";
 import { Minimap } from "./minimap";
 import { Momentum, type Stats } from "./momentum";
-import { Net, ST } from "./net";
+import { Net, type RemoteState, ST } from "./net";
 import { NPC_BEAR, NPC_GOLDEN, NPC_WHITE, NPC_WILD, NpcManager } from "./npc";
 import { Particles, Shake } from "./particles";
 import { RemoteBulls } from "./remotebulls";
@@ -58,6 +58,7 @@ import { RiderModel } from "./ridermodel";
 import { makeSkyTexture } from "./textures";
 import { BIOME_NAMES } from "./voxels";
 import { buildWorld, type World } from "./world";
+import { WowUI, type TargetInfo } from "./wowui";
 
 // ---------------------------------------------------------------------------
 // renderer
@@ -145,6 +146,9 @@ const parked = new THREE.Vector3(); // where the bull waits while you are on foo
 
 const momentum = new Momentum();
 const hud = new Hud();
+// world of warcraft-style hud overlay (player + target frames, xp bar, action
+// bar, bags, minimap ring). driven each frame from the same game state.
+const wow = new WowUI();
 // herd points: the $ansem earn ledger (economic only, never gameplay).
 // declared before flow exists, so the gate reads through a late binding.
 let earnCanUse: () => boolean = () => false;
@@ -322,6 +326,7 @@ net.onRam = (from, dx, dz, kb, up, px, py, pz, npc) => {
     lastHitBy = from;
     lastHitAt = clock;
   }
+  wow.damage(0.1 + (Math.min(kb, KB_MAX) / KB_MAX) * 0.28);
   particles.impact(px, py, pz, Math.min(1, kb / KB_MAX));
   shake.add(0.35 + (kb / KB_MAX) * 0.5);
   audio.impact(Math.min(1, kb / KB_MAX));
@@ -392,6 +397,7 @@ function wipeoutLocal(reason: string) {
   audio.chargeOff();
   bull.wipeout();
   momentum.wipeout();
+  wow.setDead(true);
   hud.showKo(reason);
   audio.wipeout();
   const by = clock - lastHitAt < KILL_CREDIT_S ? lastHitBy : "";
@@ -439,6 +445,7 @@ npcs.onLocalShove = (dx, dz, kb, up) => {
     bull.applyKnockback(dx, dz, kb, up);
     momentum.hitTaken();
   }
+  wow.damage(0.14);
   shake.add(0.3);
   audio.impact(0.4);
   hud.flash(0.25, "255,90,60");
@@ -479,6 +486,7 @@ const events = new Events({
       if (!bull.canBeHit) return;
       bull.applyKnockback(dx, dz, kb, up);
     }
+    wow.damage(0.12);
     hud.flash(0.3, "255,180,120");
   },
   toast: (t, k) => fx.toast(t, (k as never) ?? "info"),
@@ -816,6 +824,7 @@ function frame(now: number) {
     if (bull.state === "ko" && bull.koTimeLeft <= 0) {
       const sp = pickSpawn(world);
       bull.respawn(sp.x, sp.z, sp.yaw);
+      wow.revive();
       hud.hideKo();
       fx.toast("back on your hooves", "info");
     }
@@ -919,17 +928,50 @@ function frame(now: number) {
   hud.update(dt);
 
   // hud readouts
+  let zoneName = "";
   if (playing) {
     hud.setCharge(bull.charge01, bull.state === "charging", bull.state === "winded");
     hud.setMomentum(momentum.value, momentum.tier, alphaId === net.id);
-    const gi = Math.floor(bull.pos.x + GRID / 2);
-    const gj = Math.floor(bull.pos.z + GRID / 2);
+    const gi = Math.floor(focus.x + GRID / 2);
+    const gj = Math.floor(focus.z + GRID / 2);
     if (gi >= 0 && gi < GRID && gj >= 0 && gj < GRID) {
       const b = world.voxels.biome[gi * GRID + gj];
-      hud.setBiome(b >= 0 ? BIOME_NAMES[b] : "open water");
+      zoneName = b >= 0 ? BIOME_NAMES[b] : "open water";
+      hud.setBiome(zoneName);
     }
   }
   if (events.current) hud.updateBanner(events.warnLeft, events.timeLeft, EVENT_TITLES[events.current as EventKind]);
+
+  // world of warcraft hud: player + target frames, xp/level, action bar, minimap
+  if (playing) {
+    // the target is the warlord to hunt, else the nearest rival champion
+    let target: TargetInfo | null = null;
+    if (alphaId && alphaId !== net.id) {
+      const r = net.remotes.get(alphaId);
+      if (r && r.inWorld) target = { name: r.name || "a champion", classText: "warlord", hpFrac: 1, elite: true };
+    }
+    if (!target) {
+      let bestD = 55 * 55;
+      let br: RemoteState | null = null;
+      for (const [, r] of net.remotes) {
+        if (!r.inWorld || r.st === ST.ko) continue;
+        const d = (r.x - focus.x) ** 2 + (r.z - focus.z) ** 2;
+        if (d < bestD) { bestD = d; br = r; }
+      }
+      if (br) target = { name: br.name || "rival", classText: "rival champion", hpFrac: 1, elite: false };
+    }
+    wow.update(dt, {
+      name: net.myName,
+      charge: mode === "ride" ? bull.charge01 : 0,
+      alive: bull.isLive,
+      winded: bull.state === "winded",
+      isWarlord: alphaId === net.id,
+      zone: zoneName,
+      online: net.onlineCount,
+      stats: momentum.stats,
+      target,
+    });
+  }
 
   // broadcast our bull (state code from the controller state)
   const stCode =
@@ -953,6 +995,7 @@ function frame(now: number) {
   const mmShow = playing && !inCinematic();
   minimap.setVisible(mmShow);
   earn.setVisible(mmShow);
+  wow.setVisible(mmShow);
   if (mmShow) {
     if (minimap.isOpen()) minimap.draw();
     else {
