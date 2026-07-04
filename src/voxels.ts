@@ -84,14 +84,15 @@ export const BIO_CRYSTAL = 3;
 export const BIO_ASH = 4;
 export const BIO_OBSIDIAN = 5;
 export const BIO_STORM = 6;
+// realm names (world of warcraft zone flavour) shown in the hud + world map
 export const BIOME_NAMES = [
-  "green plains",
-  "ancient ruins",
-  "red canyon",
-  "crystal fields",
-  "ash valley",
-  "obsidian mountains",
-  "storm plateau",
+  "the emerald wilds",
+  "the fallen keep",
+  "the scarlet gorge",
+  "the arcane reach",
+  "the cinderwaste",
+  "blackspire peaks",
+  "the thunderheights",
 ];
 // map/hud tints per biome (minimap backdrop + hud readout)
 export const BIOME_TINTS = [0x3f7a3a, 0x5a6e46, 0xa05a30, 0x2fb5a8, 0x53504c, 0x33303e, 0x5a6d80];

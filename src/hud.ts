@@ -6,7 +6,8 @@
 
 import { MOMENTUM_CAP, TIERS } from "./config";
 
-export const TIER_NAMES = ["yearling", "charger", "brawler", "warlord", "apex bull"];
+// valor ranks (world of warcraft martial-ascension flavour)
+export const TIER_NAMES = ["recruit", "footman", "veteran", "champion", "conqueror"];
 
 export class Hud {
   private chargeEl = document.getElementById("charge-hud");

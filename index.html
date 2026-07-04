@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <title>Ansem: BullCraft</title>
-    <meta name="description" content="Ansem: BullCraft - the herd's massively multiplayer voxel stampede. charges forward. no matter what." />
-    <meta name="theme-color" content="#070a07" />
-    <meta property="og:title" content="Ansem: BullCraft" />
-    <meta property="og:description" content="charges forward. no matter what. a persistent voxel battlefield in your browser." />
+    <title>World of BullCraft</title>
+    <meta name="description" content="World of BullCraft - a persistent massively multiplayer world of stampeding bulls. claim your mount, join the herd, charge into the eternal battle." />
+    <meta name="theme-color" content="#0a1626" />
+    <meta property="og:title" content="World of BullCraft" />
+    <meta property="og:description" content="a persistent world of stampeding bulls in your browser. claim your mount, join the herd, ride to war." />
     <meta property="og:type" content="website" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
@@ -17,8 +17,8 @@
 
     <!-- corner wordmark -->
     <header id="wordmark">
-      <div class="mark">Ansem: BullCraft</div>
-      <div class="tag">charges forward. no matter what.</div>
+      <div class="mark">World of BullCraft</div>
+      <div class="tag">the herd rides to war</div>
     </header>
 
     <!-- herd online count -->
@@ -39,23 +39,23 @@
 
     <!-- first-ride how-to (shows for the first seconds in the world) -->
     <div id="howto">
-      ride with <b>wasd</b> · hold <b>left mouse</b> or <b>f</b> to charge, release to ram ·
-      ram bears and white bulls to break them · press <b>u</b> to duel a nearby rider
+      ride your mount with <b>wasd</b> · hold <b>left mouse</b> or <b>f</b> to charge, release to ram ·
+      slay world bosses and beasts · press <b>u</b> to challenge a champion to a duel
     </div>
 
-    <!-- momentum panel (top left) -->
+    <!-- valor panel (top left) -->
     <div id="momentum-hud" data-tier="0">
       <div class="mh-row">
-        <span class="mh-label">momentum</span>
+        <span class="mh-label">valor</span>
         <span id="mom-num">0</span>
-        <span id="mom-alpha">alpha</span>
+        <span id="mom-alpha">warlord</span>
       </div>
       <div class="mh-bar"><div id="mom-fill"></div></div>
-      <div class="mh-row mh-foot"><span id="mom-tier">yearling</span></div>
+      <div class="mh-row mh-foot"><span id="mom-tier">recruit</span></div>
     </div>
 
-    <!-- alpha reign strip -->
-    <div id="alpha-banner">you are the alpha - the herd is coming for you</div>
+    <!-- warlord reign strip -->
+    <div id="alpha-banner">you are the warlord - the world hunts you</div>
 
     <!-- world event banner + running chip -->
     <div id="event-banner">
@@ -82,7 +82,7 @@
     <!-- pointer-lock prompt -->
     <div id="lock-prompt" class="hidden">
       <div class="lock-inner" id="lock-inner">
-        <div class="lock-title">ride</div>
+        <div class="lock-title">to arms</div>
         <div class="lock-sub">click anywhere to take the reins</div>
         <button id="lock-controls-toggle" class="lock-ctrls-toggle" type="button">
           <span class="lct-chevron"></span><span>controls</span>
@@ -102,57 +102,58 @@
     <!-- 1. landing -->
     <div id="landing" class="flow-screen hidden">
       <div class="landing-inner">
-        <div class="land-kicker">solana &nbsp;/&nbsp; the black bull</div>
-        <div class="brand-mark">Ansem: BullCraft</div>
-        <div class="brand-sub">charges forward. no matter what.</div>
-        <div class="brand-tag">the herd's voxel battlefield. no guns. no swords. only bulls.</div>
+        <div class="brand-crest" aria-hidden="true"></div>
+        <div class="land-kicker">one world &nbsp;·&nbsp; one herd &nbsp;·&nbsp; endless war</div>
+        <div class="brand-mark">World of BullCraft</div>
+        <div class="brand-sub">the herd rides to war</div>
+        <div class="brand-tag">a persistent world of stampeding bulls. claim your mount, join the herd, and charge into the eternal battle.</div>
         <div class="land-cta">
-          <button id="play-btn" class="cta">ride free</button>
+          <button id="play-btn" class="cta">enter world</button>
         </div>
         <div class="land-feats">
           <span class="lf">one persistent world</span>
-          <span class="lf">7 biomes</span>
-          <span class="lf">1v1 ranked duels</span>
-          <span class="lf">white bulls to break</span>
-          <span class="lf">earn herd points toward $ansem claims</span>
-          <span class="lf">momentum · alpha bull · cosmetics</span>
+          <span class="lf">7 realms to roam</span>
+          <span class="lf">1v1 arena duels</span>
+          <span class="lf">hunt world bosses</span>
+          <span class="lf">earn renown</span>
+          <span class="lf">champions · warlords · the herd</span>
         </div>
       </div>
       <div class="land-statusbar">
-        <span class="sb"><i class="sb-dot"></i>herd online</span>
-        <span class="sb">charge system: hold + release</span>
-        <span class="sb">skill beats progression</span>
-        <span class="sb">for the $ansem herd · free</span>
+        <span class="sb"><i class="sb-dot"></i>the world is online</span>
+        <span class="sb">charge - hold + release</span>
+        <span class="sb">skill over grind</span>
+        <span class="sb">free to play</span>
       </div>
     </div>
 
     <!-- 2. the stable: name + bull cosmetics -->
     <div id="stable" class="flow-screen hidden">
       <div class="st-panel">
-        <div class="st-title">your bull</div>
-        <input id="st-name" class="st-name" type="text" maxlength="16" placeholder="rider name" autocomplete="off" spellcheck="false" />
+        <div class="st-title">create your champion</div>
+        <input id="st-name" class="st-name" type="text" maxlength="16" placeholder="champion name" autocomplete="off" spellcheck="false" />
         <div class="st-label">coat</div>
         <div id="st-coats"></div>
-        <div class="st-label">trim + blanket</div>
+        <div class="st-label">trim + barding</div>
         <div id="st-trims"></div>
         <div id="st-slots"></div>
-        <button id="st-deploy" class="cta">enter the battlefield</button>
+        <button id="st-deploy" class="cta">enter world</button>
         <div class="st-hint">or press <span class="key">enter</span> · locked looks unlock by playing</div>
       </div>
     </div>
 
-    <!-- loading screen -->
+    <!-- loading screen (world of warcraft style: crest, title, lore tip, gold bar) -->
     <div id="loader">
-      <div class="boot-inner">
-        <div class="boot-head">
-          <span class="boot-mark">Ansem: BullCraft</span>
-          <span class="boot-tag">// raising the battlefield</span>
-        </div>
+      <div class="boot-scene">
+        <div class="boot-crest" aria-hidden="true"></div>
+        <div class="boot-mark">World of BullCraft</div>
+        <div class="boot-tag">entering the world</div>
         <div id="boot-log" class="boot-log"></div>
-        <div class="boot-foot">
-          <div class="boot-bar"><div id="boot-bar-fill"></div></div>
-          <div id="boot-pct" class="boot-pct">0%</div>
-        </div>
+      </div>
+      <div class="boot-foot">
+        <div id="boot-tip" class="boot-tip">tip: hold to charge, release to ram. the longer the wind-up, the harder the hit.</div>
+        <div class="boot-bar"><div id="boot-bar-fill"></div></div>
+        <div id="boot-pct" class="boot-pct">0%</div>
       </div>
     </div>
 

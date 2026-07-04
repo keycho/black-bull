@@ -153,7 +153,7 @@ export class Earn {
   private buildChip() {
     const chip = document.createElement("button");
     chip.id = "earn-chip";
-    chip.innerHTML = `<span class="ec-ico">◆</span><span class="ec-num">0</span><span class="ec-label">pts · g</span>`;
+    chip.innerHTML = `<span class="ec-ico">◆</span><span class="ec-num">0</span><span class="ec-label">renown · g</span>`;
     chip.addEventListener("click", () => {
       if (this.canUse()) this.openPanel();
     });
@@ -172,11 +172,11 @@ export class Earn {
         <div class="ep-head">
           <span class="ep-ico">◆</span>
           <div>
-            <div class="ep-title">herd points</div>
-            <div class="ep-sub">earned by riding. points never change gameplay.</div>
+            <div class="ep-title">renown</div>
+            <div class="ep-sub">earned by riding. renown never changes gameplay.</div>
           </div>
         </div>
-        <div class="ep-balrow"><span class="ep-balance">0</span><span class="ep-unit">pts</span></div>
+        <div class="ep-balrow"><span class="ep-balance">0</span><span class="ep-unit">renown</span></div>
         <div class="ep-rates">
           <div class="ep-r"><span>wipe out a rider</span><b>+${EARN.wipeout}</b></div>
           <div class="ep-r"><span>claim a golden bull</span><b>+${EARN.golden}</b></div>
@@ -184,7 +184,7 @@ export class Earn {
           <div class="ep-r"><span>launch a bear</span><b>+${EARN.bear}</b></div>
           <div class="ep-r"><span>win an event</span><b>+${EARN.eventWin}</b></div>
           <div class="ep-r"><span>land a charge</span><b>+${EARN.ram}</b></div>
-          <div class="ep-r"><span>reign as alpha</span><b>+${EARN.alphaTick} / 10s</b></div>
+          <div class="ep-r"><span>reign as warlord</span><b>+${EARN.alphaTick} / 10s</b></div>
         </div>
         <div class="ep-label">solana wallet for claims</div>
         <input class="ep-wallet" type="text" maxlength="64" spellcheck="false" autocomplete="off" placeholder="paste your solana address" />
