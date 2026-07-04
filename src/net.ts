@@ -22,8 +22,20 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import { KB_MAX, POS_HZ } from "./config";
 import { type Cosmetics, DEFAULT_COSMETICS } from "./bullmodel";
 
-const URL = import.meta.env.VITE_SUPABASE_URL;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// the shared multiplayer backend (supabase realtime). the anon key is
+// PUBLISHABLE + RLS-gated - it is designed to ship in the client bundle, so
+// baking it in here is safe and lets the game ship CONNECTED out of the box
+// (no per-deploy env needed). NEVER put the service-role key here.
+//
+// to connect black bull to the pokecraft / biomes supabase project, paste that
+// project's url + anon key (Project Settings -> API) into these two constants.
+// env vars still override them when set, so a deploy can point elsewhere.
+const DEFAULT_SUPABASE_URL = "";
+const DEFAULT_SUPABASE_ANON_KEY = "";
+const URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+// its OWN room, namespaced so bull riders never collide with pokecraft players
+// even when they share one supabase project - realtime channels are isolated.
 const ROOM = "black-bull-main"; // one persistent shared world
 const SEND_INTERVAL = 1000 / POS_HZ;
 const EDIT_FLUSH = 80; // ms between edit-batch broadcasts (coalesces craters)

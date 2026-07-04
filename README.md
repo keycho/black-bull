@@ -64,13 +64,26 @@ physics all run locally).
 
 ## multiplayer
 
-create a supabase project, enable nothing special (realtime broadcast +
-presence need zero schema), and set in `.env`:
+multiplayer needs a supabase realtime backend (broadcast + presence, zero
+schema). **without it the game is solo** - you play as a host-of-one and no
+other riders ever appear (the hud reads "solo · no server configured"). there
+are two ways to connect, and either works:
 
-```
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
-```
+1. **env vars** (per deploy): set `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` in `.env` (local) or the Vercel project settings.
+2. **bake it in** (ships connected for everyone): paste the same two values
+   into `DEFAULT_SUPABASE_URL` / `DEFAULT_SUPABASE_ANON_KEY` at the top of
+   `src/net.ts`. the anon key is publishable + RLS-gated - it is meant to ship
+   in a client bundle, so this is safe. (never commit the service-role key.)
+
+to reuse the **pokecraft / biomes supabase project** as the server, copy that
+project's url + anon key (supabase dashboard -> Project Settings -> API) into
+either place above. black bull uses its OWN realtime room (`black-bull-main`),
+so bull riders never collide with pokecraft players even on one shared project.
+
+you only see other riders when someone else is online in the same room at the
+same time - to test it yourself, open the game in two browser tabs (each tab is
+a separate rider) and they will find each other.
 
 optional: create a `block_edits` table (room text, x int, y int, z int, type
 int, primary key (room,x,y,z)) so event terrain damage (craters, fissures,

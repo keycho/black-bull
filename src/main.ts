@@ -832,9 +832,16 @@ function frame(now: number) {
     syncLockUI(stage);
   }
   if (netEl) {
-    const showNet = net.enabled && (stage === "stable" || playing);
+    // always show the connection state in-world so "i'm alone" is never a
+    // mystery: connected shows the live head-count, unconfigured shows solo.
+    const showNet = stage === "stable" || playing;
     netEl.classList.toggle("show", showNet);
-    if (showNet) netEl.textContent = `herd · ${net.onlineCount} online${net.isHost ? " · host" : ""}`;
+    netEl.classList.toggle("solo", !net.enabled);
+    if (showNet) {
+      netEl.textContent = net.enabled
+        ? `herd · ${net.onlineCount} online${net.isHost ? " · host" : ""}`
+        : "solo · no server configured";
+    }
   }
 
   // adaptive music: events raise the floor; nearby bulls read as a brewing fight

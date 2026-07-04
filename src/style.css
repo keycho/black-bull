@@ -88,6 +88,9 @@ body.playing {
 #net-status.show {
   display: block;
 }
+#net-status.solo {
+  color: var(--dim);
+}
 
 #fps-hud {
   position: fixed;
